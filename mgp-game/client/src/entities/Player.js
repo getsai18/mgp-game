@@ -3,8 +3,8 @@ import { MAX_HP } from '../weapons.js';
 import { PLAYER_COLORS, SKIN_W, skinKey } from '../skins.js';
 import { play } from '../audio.js';
 
-// Tuning del movimiento. Gravedad base del mundo: 1400.
-const MOVE = {
+// Tuning del movimiento. Gravedad base del mundo: 1400. (El grafo del bot lo usa para simular saltos.)
+export const MOVE = {
   maxSpeed: 280,
   groundAccel: 2600,
   airAccel: 1600,

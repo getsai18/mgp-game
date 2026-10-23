@@ -14,7 +14,8 @@ import Replay from '../systems/Replay.js';
 import Stats from '../systems/Stats.js';
 import BotBrain, { createBot, BOT_NAME } from '../systems/Bot.js';
 import { MAX_HP, weaponName } from '../weapons.js';
-import { play, startMusic, toggleMute } from '../audio.js';
+import { play, startMusic, toggleMute, isMuted } from '../audio.js';
+import { isTouch, showTouchControls, hideTouchControls, setSoundIcon, toggleFullscreen } from '../touch.js';
 
 const PLACES = { water: 'AL AGUA', void: 'AL VACÍO', spikes: 'A LOS PINCHOS', hit: '' };
 const SEND_INTERVAL_MS = 50; // 20 Hz
@@ -409,15 +410,27 @@ export default class ArenaScene extends Phaser.Scene {
       this.resetRound((this.mapIndex + 1) % MAPS.length);
       this.round.showBanner(this.map.name, '#ffffff', 800);
     });
-    kb.on('keydown-N', () => toggleMute());
+    kb.on('keydown-N', () => this.toggleSound());
     kb.on('keydown-ESC', () => this.backToMenu());
 
+    // Táctil: botones HTML (cruceta, acciones, menú / sonido / pantalla completa). Sin ayuda de teclado.
+    if (isTouch) {
+      showTouchControls({ menu: () => this.backToMenu(), sound: () => this.toggleSound(), fullscreen: toggleFullscreen });
+      setSoundIcon(isMuted());
+      this.events.once('shutdown', hideTouchControls);
+      return;
+    }
     this.juice.ui(this.add
       .text(GAME_WIDTH - 10, 10, 'Q burla · N sonido · M mapa (práctica) · ESC menú', {
         fontFamily: 'monospace', fontSize: '11px', color: '#9a9ab8', stroke: '#000000', strokeThickness: 2,
       })
       .setOrigin(1, 0)
       .setDepth(100));
+  }
+
+  toggleSound() {
+    toggleMute();
+    setSoundIcon(isMuted());
   }
 
   // Teclado + mando + táctil (las pruebas automáticas sustituyen este método).
@@ -435,7 +448,7 @@ export default class ArenaScene extends Phaser.Scene {
 
   createNetStatus() {
     const label = this.juice.ui(this.add
-      .text(10, 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 })
+      .text(isTouch ? 64 : 10, 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 })
       .setDepth(100));
 
     const render = () => {

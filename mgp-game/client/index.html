@@ -2,15 +2,48 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen" />
     <title>Arena Caos</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #0b0b14; overflow: hidden; }
-      #game { width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+      html, body { margin: 0; height: 100%; background: #0b0b14; overflow: hidden; overscroll-behavior: none; }
+      /* dvh: en el móvil 100% no descuenta la barra del navegador. */
+      body { height: 100dvh; }
+      #game { width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+      /* --- Aviso "gira el teléfono" (solo táctil y en vertical) --- */
+      #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #0b0b14; color: #fff;
+        font: bold 18px monospace; text-align: center; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+      #rotate .phone { width: 46px; height: 80px; border: 4px solid #fff; border-radius: 9px; animation: turn 1.8s ease-in-out infinite; }
+      @keyframes turn { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+      @media (orientation: portrait) { html.touch #rotate { display: flex; } }
+
+      /* --- Controles táctiles (touch.js) --- */
+      #touch-layer { display: none; position: fixed; inset: 0; z-index: 10; pointer-events: none;
+        user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; font-family: monospace; }
+      #touch-layer [data-btn], #touch-layer [data-act] { pointer-events: auto; touch-action: none; position: absolute;
+        display: flex; align-items: center; justify-content: center; color: #fff; box-sizing: border-box;
+        background: rgba(255, 255, 255, 0.10); border: 2px solid rgba(255, 255, 255, 0.40); border-radius: 50%; }
+      #touch-layer .on { background: rgba(255, 255, 255, 0.38); }
+      .t-dpad { width: 150px; height: 110px; left: max(10px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom));
+        border-radius: 55px !important; }
+      .t-arrow { position: absolute; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        font-size: 22px; opacity: 0.85; }
+      .t-l { left: 6px; top: 32px; } .t-r { right: 6px; top: 32px; } .t-d { left: 52px; bottom: 2px; font-size: 16px; }
+      .t-jump { width: 78px; height: 78px; font-size: 34px; right: max(12px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }
+      .t-fire { width: 70px; height: 70px; font-size: 30px; right: calc(max(12px, env(safe-area-inset-right)) + 90px); bottom: max(10px, env(safe-area-inset-bottom)); }
+      .t-pickup { width: 50px; height: 50px; font-size: 20px; font-weight: bold; right: calc(max(12px, env(safe-area-inset-right)) + 16px); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 92px); }
+      .t-taunt { width: 42px; height: 42px; font-size: 20px; right: calc(max(12px, env(safe-area-inset-right)) + 104px); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px); }
+      .t-menu { position: absolute; top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); display: flex; flex-direction: column; gap: 8px; }
+      .t-menu .t-small { position: static !important; width: 38px; height: 38px; font-size: 17px; border-radius: 10px !important; background: rgba(0, 0, 0, 0.35); }
     </style>
   </head>
   <body>
     <div id="game" oncontextmenu="return false"></div>
+    <div id="rotate"><div class="phone"></div>GIRA EL TELÉFONO<br />PARA JUGAR</div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

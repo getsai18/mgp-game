@@ -6,6 +6,7 @@ import { bake } from '../systems/Juice.js';
 import { skinKey, PLAYER_COLORS } from '../skins.js';
 import { session } from '../net.js';
 import { unlockAudio, play, toggleMute, isMuted } from '../audio.js';
+import { isTouch, enterFullscreen } from '../touch.js';
 
 export const GAME_TITLE = 'ARENA CAOS';
 const NAME_MAX = 12;
@@ -30,10 +31,12 @@ export default class TitleScene extends Phaser.Scene {
     this.createNameInput();
     this.createButtons();
 
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 44,
-      'Teclado: A/D mover · W saltar · S agacharse/apuntar abajo · F disparar · E cambiar arma · Q burla\n' +
-      'Mando: stick/cruceta · A saltar · X disparar · Y arma · LB burla      Móvil: botones en pantalla',
-      { fontFamily: 'monospace', fontSize: '12px', color: '#e8eef8', align: 'center', stroke: '#000000', strokeThickness: 3 },
+    const help = isTouch
+      ? '◀ ▶ mover · ▼ bajar/apuntar abajo · ⤒ saltar · ✹ disparar · E arma · ☺ burla'
+      : 'Teclado: A/D mover · W saltar · S agacharse/apuntar abajo · F disparar · E cambiar arma · Q burla\n' +
+        'Mando: stick/cruceta · A saltar · X disparar · Y arma · LB burla      Móvil: botones en pantalla';
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 44, help,
+      { fontFamily: 'monospace', fontSize: isTouch ? '16px' : '12px', color: '#e8eef8', align: 'center', stroke: '#000000', strokeThickness: 3 },
     ).setOrigin(0.5);
 
     this.muteText = this.add.text(GAME_WIDTH - 10, 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000', strokeThickness: 3 })
@@ -113,6 +116,7 @@ export default class TitleScene extends Phaser.Scene {
     if (this.starting) return;
     this.starting = true;
     unlockAudio(); // primer gesto del usuario: ya se puede reproducir audio
+    enterFullscreen(); // móvil: pantalla completa y horizontal (necesita este mismo toque)
     play('click');
     const name = (this.nameInput.node.value || '').trim().slice(0, NAME_MAX) || 'Soldado';
     session.name = name;

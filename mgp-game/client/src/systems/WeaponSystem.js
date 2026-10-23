@@ -3,6 +3,7 @@ import { GAME_WIDTH } from '../level.js';
 import { WEAPONS, EXPLOSION, THROW, THROWN_WEAPON, randomWeaponType } from '../weapons.js';
 import { socket, session, send } from '../net.js';
 import { play } from '../audio.js';
+import { isTouch } from '../touch.js';
 
 const FIRST_SPAWN_MS = 1000;
 const SPAWN_EVERY_MS = 3500;
@@ -92,7 +93,10 @@ export default class WeaponSystem {
 
   createHud() {
     const style = { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff' };
-    this.hud = this.scene.juice.ui(this.scene.add.text(10, 482, '', style).setDepth(100));
+    // En táctil la esquina inferior izquierda la ocupa la cruceta: arma y munición abajo al centro.
+    const hud = isTouch ? this.scene.add.text(GAME_WIDTH / 2, 528, '', { ...style, fontSize: '16px', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5, 1)
+      : this.scene.add.text(10, 482, '', style);
+    this.hud = this.scene.juice.ui(hud.setDepth(100));
     this.prompt = this.scene.add
       .text(0, 0, 'E', { ...style, fontSize: '12px', backgroundColor: '#000000aa', padding: { x: 3, y: 1 } })
       .setOrigin(0.5, 1).setDepth(100).setVisible(false);

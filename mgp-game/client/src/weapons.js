@@ -37,6 +37,11 @@ export const EXPLOSION = {
 
 export const MAX_HP = 2;
 
+// Arma lanzada (E sin nada cerca): vuela girando y golpea. Por red viaja como arma 4 en 'player_hit'.
+export const THROW = { speed: 560, lift: 220, damage: 1, knockback: 300, lifeMs: 1500, harmfulSpeed: 260 };
+export const THROWN_WEAPON = 4;
+export const weaponName = (w) => (w === THROWN_WEAPON ? 'ARMA LANZADA' : WEAPONS[w]?.name ?? '???');
+
 export function randomWeaponType() {
   const entries = Object.entries(WEAPONS);
   let roll = Math.random() * entries.reduce((sum, [, w]) => sum + w.weight, 0);

@@ -67,6 +67,6 @@ export default class BootScene extends Phaser.Scene {
     g.clear();
 
     g.destroy();
-    this.scene.start('Arena');
+    this.scene.start('Title');
   }
 }

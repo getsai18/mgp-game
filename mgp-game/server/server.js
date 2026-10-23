@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const PORT = process.env.PORT || 3000;
-const RELAY_EVENTS = ['player_shoot', 'weapon_spawn', 'weapon_pickup', 'player_hit', 'round_end'];
+const RELAY_EVENTS = [
+  'player_shoot', 'weapon_spawn', 'weapon_pickup', 'player_hit', 'round_end',
+  'player_info', 'player_taunt', 'weapon_throw',
+];
 // Estado de posición: si el socket está saturado se descarta (llega otro en 50 ms).
 const VOLATILE_EVENTS = ['player_move'];
 

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { MAX_HP } from '../weapons.js';
 import { PLAYER_COLORS, SKIN_W, skinKey } from '../skins.js';
+import { play } from '../audio.js';
 
 // Tuning del movimiento. Gravedad base del mundo: 1400.
 const MOVE = {
@@ -107,6 +108,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       this.lastGroundedAt = -Infinity;
       this.jumping = true;
       this.puff(8);
+      play('jump', this.x, 0.8);
       // Stretch al despegar.
       this.scene.tweens.add({ targets: this, scaleY: 1.2, scaleX: 0.85, duration: 70, yoyo: true });
     }
@@ -163,6 +165,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   land() {
     this.puff(6);
+    play('land', this.x, 0.5);
     // Squash al aterrizar.
     this.scene.tweens.add({ targets: this, scaleY: 0.8, scaleX: 1.2, duration: 60, yoyo: true });
   }
@@ -193,6 +196,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   die(kx = 0, ky = 0, cause = 'hit') {
     if (!this.alive) return;
     this.alive = false;
+    this.deathCause = cause;
     this.hp = 0;
     this.body.checkCollision.none = true;
     this.setCollideWorldBounds(false);

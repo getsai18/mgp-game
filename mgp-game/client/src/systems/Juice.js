@@ -25,7 +25,10 @@ export default class Juice {
     // Todo objeto nuevo la ignora salvo que se marque con ui().
     this.uiCam = scene.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT).setName('ui');
     for (const obj of scene.children.list) this.uiCam.ignore(obj);
-    scene.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, (obj) => !obj.isUI && this.uiCam.ignore(obj));
+    const onAdded = (obj) => !obj.isUI && this.uiCam.ignore(obj);
+    scene.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, onAdded);
+    // La escena se reutiliza al volver del menú: no dejar este listener apuntando a una cámara destruida.
+    scene.events.once('shutdown', () => scene.events.off(Phaser.Scenes.Events.ADDED_TO_SCENE, onAdded));
 
     this.hitStopUntil = 0;
     this.slowUntil = 0;
@@ -119,16 +122,16 @@ export default class Juice {
     if (all.length > MAX_CASINGS) all[0].destroy();
   }
 
-  shockwave(x, y, radius) {
+  shockwave(x, y, radius, depth = 8) {
     const s = this.scene;
-    const ring = s.add.graphics().setDepth(8);
+    const ring = s.add.graphics().setDepth(depth);
     const state = { r: 8, a: 1 };
     s.tweens.add({
       targets: state, r: radius * 1.2, a: 0, duration: 320, ease: 'Quad.easeOut',
       onUpdate: () => ring.clear().lineStyle(4, 0xffeecc, state.a).strokeCircle(x, y, state.r),
       onComplete: () => ring.destroy(),
     });
-    const flash = s.add.image(x, y, 'puff').setScale(radius / 3).setTint(0xffffcc).setDepth(8)
+    const flash = s.add.image(x, y, 'puff').setScale(radius / 3).setTint(0xffffcc).setDepth(depth)
       .setBlendMode(Phaser.BlendModes.ADD);
     s.tweens.add({ targets: flash, alpha: 0, scale: radius / 2, duration: 140, onComplete: () => flash.destroy() });
     this.smokeLinger.explode(10, x, y);

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './level.js';
 import BootScene from './scenes/BootScene.js';
+import TitleScene from './scenes/TitleScene.js';
 import ArenaScene from './scenes/ArenaScene.js';
 import { socket, session } from './net.js';
 
@@ -16,7 +17,9 @@ const game = new Phaser.Game({
     default: 'arcade',
     arcade: { gravity: { y: 1400 }, debug: false },
   },
-  scene: [BootScene, ArenaScene],
+  input: { gamepad: true },
+  dom: { createContainer: true }, // campo de nombre en la pantalla de título
+  scene: [BootScene, TitleScene, ArenaScene],
 });
 
 // Acceso desde la consola / pruebas automáticas, solo en desarrollo.

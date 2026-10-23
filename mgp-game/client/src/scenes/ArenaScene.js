@@ -2,14 +2,21 @@ import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
 import { MAPS } from '../maps.js';
 import { drawMapTiles, drawMapBackground } from '../mapTiles.js';
-import { socket, session } from '../net.js';
+import { socket, session, leaveRoom } from '../net.js';
 import Player, { PLAYER_COLORS } from '../entities/Player.js';
 import RemotePlayer, { packState } from '../entities/RemotePlayer.js';
 import WeaponSystem from '../systems/WeaponSystem.js';
 import RoundManager from '../systems/RoundManager.js';
 import Juice, { bake } from '../systems/Juice.js';
-import { MAX_HP } from '../weapons.js';
+import Controls from '../systems/Controls.js';
+import Banter from '../systems/Banter.js';
+import Replay from '../systems/Replay.js';
+import Stats from '../systems/Stats.js';
+import BotBrain, { createBot, BOT_NAME } from '../systems/Bot.js';
+import { MAX_HP, weaponName } from '../weapons.js';
+import { play, startMusic, toggleMute } from '../audio.js';
 
+const PLACES = { water: 'AL AGUA', void: 'AL VACÍO', spikes: 'A LOS PINCHOS', hit: '' };
 const SEND_INTERVAL_MS = 50; // 20 Hz
 const IDLE_RESEND_MS = 250; // si nada cambia, reenviar solo cada 250 ms
 
@@ -18,7 +25,22 @@ export default class ArenaScene extends Phaser.Scene {
     super('Arena');
   }
 
+  // mode: 'online' (conecta y espera rival practicando) | 'offline' (práctica sin conexión) | 'bot' (VS BOT sin conexión)
+  init(data) {
+    this.mode = data?.mode ?? 'online';
+  }
+
   create() {
+    // La escena se reutiliza al volver del menú: limpiar referencias de la partida anterior.
+    this.leaving = false;
+    this.mapIndex = -1;
+    this.mapBg = null;
+    this.mapLayer = null;
+    this.botBrain = null;
+    session.opponentName = this.mode === 'bot' ? BOT_NAME : null;
+    if (this.mode === 'online' && !socket.connected) socket.connect();
+    this.cameras.main.fadeIn(250, 0, 0, 0);
+
     // Sin suelo ni techo en los límites del mundo: se cae al agua / al vacío y se puede volar hacia arriba.
     this.physics.world.setBoundsCollision(true, true, false, false);
 
@@ -33,26 +55,38 @@ export default class ArenaScene extends Phaser.Scene {
     this.createInput();
     this.createNetStatus();
     this.createNetSync();
+    this.banter = new Banter(this);
+    this.replay = new Replay(this);
+    this.stats = new Stats(this);
+    this.events.once('shutdown', () => this.replay.stop());
+    this.lastHitOnMe = null; // { w, at }: para saber quién nos mandó al agua / vacío
+    this.lastHitOnRemote = null;
     this.round = new RoundManager(this);
     this.weapons.canDealDamage = () => this.round.canDealDamage();
+    this.weapons.onDealtHit = (w) => (this.lastHitOnRemote = { w, at: this.time.now });
+    if (this.mode === 'bot') this.round.startMatch(); // el bot ya existe: arrancar la partida
     this.hpBars = this.add.graphics().setDepth(20);
+    const nameStyle = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 };
+    this.nameTags = [this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20), this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20)];
   }
 
   update(time, delta) {
     const input = this.readInput();
     this.juice.update();
-    // Práctica: M cambia de mapa para poder verlos todos.
-    if (Phaser.Input.Keyboard.JustDown(this.keys.map) && this.round.phase === 'solo') {
-      this.resetRound((this.mapIndex + 1) % MAPS.length);
-      this.round.showBanner(this.map.name, '#ffffff', 800);
-    }
     this.player.update(input, time, delta);
     const rx = this.remote?.x;
     const ry = this.remote?.y;
-    this.remote?.update(delta);
+    if (this.botBrain) this.botBrain.update(time, delta);
+    else this.remote?.update(delta);
     this.weapons.update(input, time);
+    this.banter.tryTaunt(input, time);
+    this.banter.update(time);
     this.sendState(time);
     this.drawHpBars();
+    if (this.round.phase !== 'solo') {
+      const w = this.weapons;
+      this.replay.record([this.player, this.remote, w.localHeld, w.remoteHeld, ...w.bullets.getChildren(), ...w.thrown.getChildren()]);
+    }
 
     // Estelas al salir volando (retroceso, explosión, muerte), no al saltar o caer normal.
     const p = this.player;
@@ -68,9 +102,18 @@ export default class ArenaScene extends Phaser.Scene {
   // Inicio de ronda (lo llama RoundManager): todos a su sitio, mapa limpio.
   resetRound(mapIndex = this.mapIndex) {
     this.killCamPlayed = false;
+    this.replay?.stop();
+    this.lastHitOnMe = null;
+    this.lastHitOnRemote = null;
     if (mapIndex !== this.mapIndex) this.buildMap(mapIndex);
     this.player.spawnPoint = this.map.spawns[session.playerIndex];
     this.player.respawn();
+    if (this.botBrain) {
+      this.remote.spawnPoint = this.map.spawns[1 - session.playerIndex];
+      this.remote.respawn();
+      this.remote.weapon = null;
+    }
+    this.stats?.hidePanel();
     this.weapons.resetRound();
     this.juice.casings.clear(true, true);
   }
@@ -80,10 +123,16 @@ export default class ArenaScene extends Phaser.Scene {
     const { deathY, theme } = this.map;
     if (theme.death === 'water' && y > deathY - 40) {
       this.waterSplash.explode(45, x, deathY);
+      play('splash', x);
     } else if (y < GAME_HEIGHT - 10) {
       this.weapons.blood.explode(45, x, y);
+      play('death', x);
+    } else {
+      play('fall', x, 0.7);
     }
     this.cameras.main.shake(local ? 250 : 180, local ? 0.016 : 0.01);
+    this.replay?.event('death', x, y);
+    if (!local) this.feedRemoteDeath(x, y);
     // Kill-cam una vez por ronda: la primera muerte (la que decide). No depende de la fase porque
     // en el host la muerte del rival se ve ~150 ms tarde (interpolación) y el veredicto puede llegar antes.
     if (this.round && this.round.phase !== 'solo' && !this.killCamPlayed) {
@@ -92,7 +141,72 @@ export default class ArenaScene extends Phaser.Scene {
     }
   }
 
+  // Impacto sobre nuestro jugador: confirmado por el rival (red) o causado por el bot (local).
+  receiveHit(d) {
+    if (!d || !this.round.canDealDamage() || !this.player.alive) return;
+    const dmg = Phaser.Math.Clamp(Math.round(d.d) || 0, 0, MAX_HP);
+    const kx = Phaser.Math.Clamp(Number(d.kx) || 0, -800, 800);
+    const ky = Phaser.Math.Clamp(Number(d.ky) || 0, -800, 800);
+    if (dmg === 0) return;
+    this.lastHitOnMe = { w: d.w, at: this.time.now };
+    this.stats?.hit('rival');
+    this.juice.hurtFlash();
+    play('hit', this.player.x);
+    this.weapons.blood.explode(10, this.player.x, this.player.y);
+    if (!this.player.hurt(dmg, kx, ky)) {
+      this.cameras.main.shake(90, 0.008);
+      this.juice.hitStop(60);
+    }
+  }
+
+  // Nuestro impacto sobre el bot (en modo VS BOT no hay red).
+  botTakeHit(d) {
+    const bot = this.remote;
+    if (!bot?.alive) return;
+    this.weapons.blood.explode(10, bot.x, bot.y);
+    bot.hurt(d.d, d.kx, d.ky);
+  }
+
+  // --- Registro de muertes (cada cliente lo arma con lo que sabe; no viaja por red) ---
+  feedLocalDeath(cause) {
+    const me = session.name.toUpperCase();
+    const rival = (session.opponentName || 'RIVAL').toUpperCase();
+    const hit = this.recentHit(this.lastHitOnMe);
+    const rivalColor = `#${PLAYER_COLORS[1 - session.playerIndex].toString(16)}`;
+    if (cause === 'hit' && hit) return this.banter.feed(`${rival} ✹ ${me}  [${weaponName(hit.w)}]`, rivalColor);
+    const place = PLACES[cause] ?? '';
+    if (hit) this.banter.feed(`${rival} MANDÓ A ${me} ${place}`, rivalColor);
+    else this.banter.feed(`${me} CAYÓ ${place}`, '#cccccc');
+  }
+
+  feedRemoteDeath(x, y) {
+    const me = session.name.toUpperCase();
+    const rival = (session.opponentName || 'RIVAL').toUpperCase();
+    const { deathY, theme, spikes } = this.map;
+    let cause = 'hit';
+    if (theme.death === 'water' && y > deathY - 40) cause = 'water';
+    else if (y > GAME_HEIGHT - 10) cause = 'void';
+    else if (spikes.some((s) => x > s.x - 10 && x < s.x + s.w + 10 && Math.abs(y + 20 - s.y) < 30)) cause = 'spikes';
+    const hit = this.recentHit(this.lastHitOnRemote);
+    const myColor = `#${PLAYER_COLORS[session.playerIndex].toString(16)}`;
+    this.stats.death('rival', cause !== 'hit');
+    if (cause === 'hit' && hit) return this.banter.feed(`${me} ✹ ${rival}  [${weaponName(hit.w)}]`, myColor);
+    if (hit) this.banter.feed(`${me} MANDÓ A ${rival} ${PLACES[cause] ?? ''}`, myColor);
+    else this.banter.feed(`${rival} CAYÓ ${PLACES[cause] ?? ''}`, '#cccccc');
+  }
+
+  recentHit(h) {
+    return h && this.time.now - h.at < 2500 ? h : null;
+  }
+
   drawHpBars() {
+    // Nombres sobre las cabezas.
+    [[this.player, session.name], [this.remote, session.opponentName]].forEach(([p, name], i) => {
+      const tag = this.nameTags[i];
+      const show = !!p && p.alive && p.visible && !!name;
+      tag.setVisible(show);
+      if (show) tag.setText(name).setPosition(p.x, p.y - 32).setColor(`#${p.color.toString(16)}`);
+    });
     const g = this.hpBars.clear();
     for (const p of [this.player, this.remote]) {
       if (!p || !p.alive || !p.visible) continue;
@@ -138,6 +252,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.mapObjects = [];
     this.createDeathZone(map);
     this.createAmbient(map);
+    startMusic(index); // cada mapa transpone la música
   }
 
   // Agua helada (con oleaje y témpanos) o vacío (oscurece hacia abajo).
@@ -194,6 +309,8 @@ export default class ArenaScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.hazards, () => this.player.die(0, 0, 'spikes'));
 
     this.player.onDeath = (p) => {
+      this.stats.death('me', p.deathCause !== 'hit');
+      this.feedLocalDeath(p.deathCause);
       this.weapons.onLocalDeath();
       this.deathEffect(p.x, p.y, true);
       this.round.onLocalDeath();
@@ -222,19 +339,7 @@ export default class ArenaScene extends Phaser.Scene {
       match_start: () => this.ensureRemote(),
       opponent_left: () => this.removeRemote(),
       // El rival nos confirma un impacto (él es la autoridad sobre sus balas).
-      player_hit: (d) => {
-        if (!d || !this.round.canDealDamage() || !this.player.alive) return;
-        const dmg = Phaser.Math.Clamp(Math.round(d.d) || 0, 0, MAX_HP);
-        const kx = Phaser.Math.Clamp(Number(d.kx) || 0, -800, 800);
-        const ky = Phaser.Math.Clamp(Number(d.ky) || 0, -800, 800);
-        if (dmg === 0) return;
-        this.weapons.blood.explode(10, this.player.x, this.player.y);
-        this.juice.hurtFlash();
-        if (!this.player.hurt(dmg, kx, ky)) {
-          this.cameras.main.shake(90, 0.008);
-          this.juice.hitStop(60);
-        }
-      },
+      player_hit: (d) => this.receiveHit(d),
       player_move: (packed) => {
         if (!Array.isArray(packed) || packed.length !== 5) return;
         this.ensureRemote().pushState(packed);
@@ -244,6 +349,28 @@ export default class ArenaScene extends Phaser.Scene {
     this.events.once('shutdown', () => Object.entries(handlers).forEach(([evt, fn]) => socket.off(evt, fn)));
 
     if (session.opponent) this.ensureRemote();
+    if (this.mode === 'bot') this.createBotOpponent();
+  }
+
+  // VS BOT: el rival es un Player con física propia controlado por BotBrain, en este navegador.
+  createBotOpponent() {
+    const skin = 1 - session.playerIndex;
+    const bot = createBot(this, this.map.spawns[skin], skin);
+    this.physics.add.collider(bot, this.platforms, null, (b, block) => !(block.oneWay && b.isDropping()));
+    this.physics.add.overlap(bot, this.hazards, () => bot.die(0, 0, 'spikes'));
+    bot.onDeath = (b) => {
+      this.deathEffect(b.x, b.y, false);
+      bot.weapon = null;
+      this.round.onBotDeath();
+    };
+    this.remote = bot;
+    this.weapons.setRemote(bot);
+    this.weapons.remoteIsBot = true;
+    this.botBrain = new BotBrain(this, bot);
+  }
+
+  onMatchEnd(winner) {
+    this.stats.showPanel(winner, this.round.score, (i) => this.round.nameOf(i));
   }
 
   ensureRemote() {
@@ -274,42 +401,46 @@ export default class ArenaScene extends Phaser.Scene {
   }
 
   createInput() {
-    const K = Phaser.Input.Keyboard.KeyCodes;
-    this.keys = this.input.keyboard.addKeys({
-      left: K.A, right: K.D, up: K.W, down: K.S,
-      left2: K.LEFT, right2: K.RIGHT, up2: K.UP, down2: K.DOWN,
-      space: K.SPACE,
-      pickup: K.E, fire: K.F, fire2: K.J, map: K.M,
+    this.controls = new Controls(this);
+    // Atajos que no son de juego: M mapa (práctica), N sonido, ESC volver al menú.
+    const kb = this.input.keyboard;
+    kb.on('keydown-M', () => {
+      if (this.round.phase !== 'solo') return;
+      this.resetRound((this.mapIndex + 1) % MAPS.length);
+      this.round.showBanner(this.map.name, '#ffffff', 800);
     });
-    this.jumpKeys = [this.keys.up, this.keys.up2, this.keys.space];
+    kb.on('keydown-N', () => toggleMute());
+    kb.on('keydown-ESC', () => this.backToMenu());
 
     this.juice.ui(this.add
-      .text(GAME_WIDTH - 10, 10, 'A/D ←/→ mover · W/↑/Espacio saltar · S/↓ caer/apuntar abajo · F/J disparar · E cambiar arma · M mapa (práctica)', {
-        fontFamily: 'monospace', fontSize: '11px', color: '#666688',
+      .text(GAME_WIDTH - 10, 10, 'Q burla · N sonido · M mapa (práctica) · ESC menú', {
+        fontFamily: 'monospace', fontSize: '11px', color: '#9a9ab8', stroke: '#000000', strokeThickness: 2,
       })
       .setOrigin(1, 0)
       .setDepth(100));
   }
 
+  // Teclado + mando + táctil (las pruebas automáticas sustituyen este método).
   readInput() {
-    const k = this.keys;
-    return {
-      left: k.left.isDown || k.left2.isDown,
-      right: k.right.isDown || k.right2.isDown,
-      down: k.down.isDown || k.down2.isDown,
-      jumpHeld: this.jumpKeys.some((key) => key.isDown),
-      jumpPressed: this.jumpKeys.some((key) => Phaser.Input.Keyboard.JustDown(key)),
-      fireHeld: k.fire.isDown || k.fire2.isDown,
-      pickupPressed: Phaser.Input.Keyboard.JustDown(k.pickup),
-    };
+    return this.controls.read();
+  }
+
+  backToMenu() {
+    if (this.leaving) return;
+    this.leaving = true;
+    leaveRoom();
+    this.cameras.main.fadeOut(200, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Title'));
   }
 
   createNetStatus() {
     const label = this.juice.ui(this.add
-      .text(10, 10, '', { fontFamily: 'monospace', fontSize: '14px', color: '#aaaacc' })
+      .text(10, 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 })
       .setDepth(100));
 
     const render = () => {
+      if (this.mode === 'offline') return label.setText('MODO PRÁCTICA · sin conexión');
+      if (this.mode === 'bot') return label.setText('VS BOT · sin conexión');
       if (!socket.connected) return label.setText(session.roomId ? 'Sin conexión con el servidor' : 'Conectando...');
       const who = `${session.roomId} · jugador ${session.playerIndex + 1}${session.isHost ? ' (host)' : ''}`;
       label.setText(`${who} · ${session.opponent ? '¡rival conectado!' : 'esperando rival...'}`);

@@ -1,14 +1,23 @@
 import { GAME_WIDTH } from '../level.js';
 import { PLAYER_COLORS } from '../entities/Player.js';
 import { MAPS, mapForRound } from '../maps.js';
-import { socket, session } from '../net.js';
+import { socket, session, send } from '../net.js';
+import { play } from '../audio.js';
 
 const WINS_TO_MATCH = 5;
 const DRAW_WINDOW_MS = 250; // dos muertes dentro de esta ventana = empate
-const NEXT_ROUND_MS = 2200;
-const NEXT_MATCH_MS = 4000;
+// Entre rondas: cartel (~1 s) -> repetición de la jugada (~2.7 s a x0.6) -> siguiente ronda.
+// Fin de partida: igual y luego el cartel de campeón.
+const BANNER_MS = 950;
+const REPLAY_AT_MS = 1000;
+const REPLAY_FROM_AGO_MS = 2300; // tramo grabado: de 2.3 s antes a 0.7 s antes del inicio de la repetición
+const REPLAY_TO_AGO_MS = 700;
+const REPLAY_SPEED = 0.6;
+const REPLAY_END_MS = REPLAY_AT_MS + (REPLAY_FROM_AGO_MS - REPLAY_TO_AGO_MS) / REPLAY_SPEED;
+const NEXT_ROUND_MS = Math.round(REPLAY_END_MS + 350);
+const NEXT_MATCH_MS = Math.round(REPLAY_END_MS + 3600);
 const SOLO_RESPAWN_MS = 1200;
-const NAMES = ['AZUL', 'ROJO'];
+const NAMES = ['AZUL', 'ROJO']; // si alguien no tiene nombre
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -51,9 +60,15 @@ export default class RoundManager {
       opponent_left: () => this.toSolo(),
       joined: () => this.toSolo(),
       round_end: (d) => this.onRoundEnd(d),
+      player_info: () => this.renderScore(),
     };
     for (const [evt, fn] of Object.entries(handlers)) socket.on(evt, fn);
     this.scene.events.once('shutdown', () => Object.entries(handlers).forEach(([evt, fn]) => socket.off(evt, fn)));
+  }
+
+  nameOf(index) {
+    const name = index === session.playerIndex ? session.name : session.opponentName;
+    return (name || NAMES[index]).toUpperCase();
   }
 
   canDealDamage() {
@@ -63,6 +78,7 @@ export default class RoundManager {
   // ------------------------------------------------------------------ flujo
   startMatch() {
     this.cancelTimers();
+    this.scene.stats?.reset();
     this.score = [0, 0];
     this.round = 1;
     this.startRound();
@@ -86,6 +102,7 @@ export default class RoundManager {
     this.scene.resetRound(mapIndex);
     this.renderScore();
     this.showBanner(`RONDA ${this.round}\n${MAPS[mapIndex].name}`, '#ffffff', 1000);
+    play('round');
   }
 
   onLocalDeath() {
@@ -93,9 +110,14 @@ export default class RoundManager {
       this.nextTimer = this.scene.time.delayedCall(SOLO_RESPAWN_MS, () => this.scene.player.respawn());
     } else if (this.phase === 'playing') {
       if (session.isHost) this.registerDeath(session.playerIndex);
-      else socket.emit('round_end', { r: this.round, loser: session.playerIndex });
+      else send('round_end', { r: this.round, loser: session.playerIndex });
     }
     // 'ended': ya hay veredicto; reaparecerá al empezar la siguiente ronda.
+  }
+
+  // VS BOT: somos host y árbitro; la muerte del bot cuenta como la del rival.
+  onBotDeath() {
+    if (this.phase === 'playing') this.registerDeath(1 - session.playerIndex);
   }
 
   onRoundEnd(d) {
@@ -118,7 +140,7 @@ export default class RoundManager {
       if (winner >= 0) score[winner]++;
       const match = winner >= 0 && score[winner] >= WINS_TO_MATCH ? winner : -1;
       const verdict = { r: this.round, winner, score, match };
-      socket.emit('round_end', verdict);
+      send('round_end', verdict);
       this.applyVerdict(verdict);
     });
   }
@@ -130,14 +152,22 @@ export default class RoundManager {
     this.renderScore();
 
     if (match >= 0) {
-      this.showBanner(`¡${NAMES[match]} GANA\nLA PARTIDA!`, hex(PLAYER_COLORS[match]), NEXT_MATCH_MS - 300);
+      this.showBanner(`¡${this.nameOf(match)} GANA\nLA PARTIDA!`, hex(PLAYER_COLORS[match]), BANNER_MS);
       this.scene.cameras.main.flash(300, 255, 255, 255);
     } else if (winner >= 0) {
-      this.showBanner(`¡${NAMES[winner]} GANA\nLA RONDA!`, hex(PLAYER_COLORS[winner]), NEXT_ROUND_MS - 300);
+      this.showBanner(`¡${this.nameOf(winner)} GANA\nLA RONDA!`, hex(PLAYER_COLORS[winner]), BANNER_MS);
     } else {
-      this.showBanner('¡EMPATE!', '#ffffff', NEXT_ROUND_MS - 300);
+      this.showBanner('¡EMPATE!', '#ffffff', BANNER_MS);
+    }
+    this.replayTimer = this.scene.time.delayedCall(REPLAY_AT_MS, () => this.scene.replay.play(REPLAY_FROM_AGO_MS, REPLAY_TO_AGO_MS, REPLAY_SPEED));
+    if (match >= 0) {
+      this.championTimer = this.scene.time.delayedCall(REPLAY_END_MS + 50, () => {
+        this.showBanner(`🏆 ${this.nameOf(match)}\nCAMPEÓN`, hex(PLAYER_COLORS[match]), NEXT_MATCH_MS - REPLAY_END_MS - 400);
+        this.scene.onMatchEnd?.(match);
+      });
     }
 
+    if (winner >= 0) play('win');
     this.nextTimer = this.scene.time.delayedCall(match >= 0 ? NEXT_MATCH_MS : NEXT_ROUND_MS, () => {
       // Partida nueva: marcador a cero. El número de ronda solo vuelve a 1 en ambos a la vez,
       // porque los dos aplican el mismo veredicto.
@@ -148,16 +178,15 @@ export default class RoundManager {
   }
 
   cancelTimers() {
-    this.decideTimer?.remove();
-    this.nextTimer?.remove();
-    this.decideTimer = null;
-    this.nextTimer = null;
+    for (const t of [this.decideTimer, this.nextTimer, this.replayTimer, this.championTimer]) t?.remove();
+    this.decideTimer = this.nextTimer = this.replayTimer = this.championTimer = null;
+    this.scene.replay?.stop();
   }
 
   // --------------------------------------------------------------------- UI
   renderScore() {
     if (this.phase === 'solo') return this.scoreText.setText('PRÁCTICA');
-    this.scoreText.setText(`${NAMES[0]} ${this.score[0]}  -  ${this.score[1]} ${NAMES[1]}   ·  R${this.round}  ·  a ${WINS_TO_MATCH}`);
+    this.scoreText.setText(`${this.nameOf(0)} ${this.score[0]}  -  ${this.score[1]} ${this.nameOf(1)}   ·  R${this.round}  ·  a ${WINS_TO_MATCH}`);
   }
 
   showBanner(text, color, ms) {

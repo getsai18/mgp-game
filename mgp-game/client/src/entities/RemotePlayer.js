@@ -3,8 +3,8 @@ import { PLAYER_COLORS, POSES, SKIN_W, skinKey } from '../skins.js';
 
 // Formato de red de 'player_move' (array para que pese ~25 bytes):
 //   [x, y, vx, vy, flags]
-//   flags: bit0 = flipX, bit1 = vivo, bits2-4 = pose, bits5-6 = arma (0 = ninguna), bit7 = apunta abajo,
-//          bits8-9 = vida
+//   flags: bit0 = flipX, bit1 = vivo, bits2-4 = pose, bits5-7 = arma (0 = ninguna, hasta 7 tipos),
+//          bit8 = apunta abajo, bits9-10 = vida
 const POSE_INDEX = Object.fromEntries(POSES.map((key, i) => [key, i]));
 
 export function packState(player, weaponType = 0, aimDown = false) {
@@ -12,9 +12,9 @@ export function packState(player, weaponType = 0, aimDown = false) {
     (player.flipX ? 1 : 0) |
     (player.alive ? 2 : 0) |
     ((POSE_INDEX[player.pose] ?? 0) << 2) |
-    ((weaponType & 3) << 5) |
-    (aimDown ? 128 : 0) |
-    ((player.hp & 3) << 8);
+    ((weaponType & 7) << 5) |
+    (aimDown ? 256 : 0) |
+    ((player.hp & 3) << 9);
   const { x: vx, y: vy } = player.body.velocity;
   return [Math.round(player.x), Math.round(player.y), Math.round(vx), Math.round(vy), flags];
 }
@@ -25,9 +25,9 @@ function unpackState([x, y, vx, vy, flags]) {
     flip: !!(flags & 1),
     alive: !!(flags & 2),
     pose: POSES[(flags >> 2) & 7] ?? POSES[0],
-    weaponType: (flags >> 5) & 3,
-    aimDown: !!(flags & 128),
-    hp: (flags >> 8) & 3,
+    weaponType: (flags >> 5) & 7,
+    aimDown: !!(flags & 256),
+    hp: (flags >> 9) & 3,
   };
 }
 

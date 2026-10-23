@@ -13,6 +13,8 @@ import Banter from '../systems/Banter.js';
 import Replay from '../systems/Replay.js';
 import Stats from '../systems/Stats.js';
 import BotBrain, { createBot, BOT_NAME } from '../systems/Bot.js';
+import { watchFps, toggleQuality, isHighQuality } from '../systems/Gfx.js';
+import Lights from '../systems/Lights.js';
 import { MAX_HP, weaponName } from '../weapons.js';
 import { play, startMusic, toggleMute, isMuted } from '../audio.js';
 import { isTouch, showTouchControls, hideTouchControls, setSoundIcon, toggleFullscreen } from '../touch.js';
@@ -49,6 +51,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.hazards = this.physics.add.staticGroup(); // pinchos
     this.mapObjects = []; // decorado vivo del mapa actual (agua, partículas): se destruye al cambiar
     this.juice = new Juice(this, this.platforms);
+    this.glow = new Lights(this); // (this.lights es el plugin de luces de Phaser)
     this.createSplashes();
     this.buildMap(0);
     this.createLocalPlayer();
@@ -73,7 +76,9 @@ export default class ArenaScene extends Phaser.Scene {
 
   update(time, delta) {
     const input = this.readInput();
+    watchFps(this.game, time);
     this.juice.update();
+    this.glow.update(time);
     this.player.update(input, time, delta);
     const rx = this.remote?.x;
     const ry = this.remote?.y;
@@ -250,7 +255,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.mapLayer = bake(this, drawMapTiles(this, map)).setDepth(0);
 
     for (const obj of this.mapObjects) obj.destroy();
-    this.mapObjects = [];
+    this.mapObjects = this.glow.setMap(map);
     this.createDeathZone(map);
     this.createAmbient(map);
     startMusic(index); // cada mapa transpone la música
@@ -403,7 +408,7 @@ export default class ArenaScene extends Phaser.Scene {
 
   createInput() {
     this.controls = new Controls(this);
-    // Atajos que no son de juego: M mapa (práctica), N sonido, ESC volver al menú.
+    // Atajos que no son de juego: M mapa (práctica), N sonido, G gráficos, ESC volver al menú.
     const kb = this.input.keyboard;
     kb.on('keydown-M', () => {
       if (this.round.phase !== 'solo') return;
@@ -411,6 +416,10 @@ export default class ArenaScene extends Phaser.Scene {
       this.round.showBanner(this.map.name, '#ffffff', 800);
     });
     kb.on('keydown-N', () => this.toggleSound());
+    kb.on('keydown-G', () => {
+      toggleQuality();
+      this.round.showBanner(isHighQuality() ? 'GRÁFICOS ALTOS' : 'GRÁFICOS BAJOS', '#ffffff', 700);
+    });
     kb.on('keydown-ESC', () => this.backToMenu());
 
     // Táctil: botones HTML (cruceta, acciones, menú / sonido / pantalla completa). Sin ayuda de teclado.
@@ -421,7 +430,7 @@ export default class ArenaScene extends Phaser.Scene {
       return;
     }
     this.juice.ui(this.add
-      .text(GAME_WIDTH - 10, 10, 'Q burla · N sonido · M mapa (práctica) · ESC menú', {
+      .text(GAME_WIDTH - 10, 10, 'Q burla · N sonido · G gráficos · M mapa (práctica) · ESC menú', {
         fontFamily: 'monospace', fontSize: '11px', color: '#9a9ab8', stroke: '#000000', strokeThickness: 2,
       })
       .setOrigin(1, 0)

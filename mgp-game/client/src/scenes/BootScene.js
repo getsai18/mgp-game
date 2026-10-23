@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { generateSkinTextures } from '../skins.js';
+import { generateLightTexture } from '../systems/Lights.js';
 
 // Genera todas las texturas por código: no hay assets que cargar.
 export default class BootScene extends Phaser.Scene {
@@ -17,6 +18,9 @@ export default class BootScene extends Phaser.Scene {
 
     // Personajes (soldado chibi con armadura; pañuelo y luces del color del jugador).
     generateSkinTextures(this);
+
+    // Luz suave (systems/Lights.js).
+    generateLightTexture(this);
 
     // Humo / fuego suave.
     g.fillStyle(0xffffff, 0.5).fillCircle(4, 4, 4);

@@ -4,6 +4,7 @@ import BootScene from './scenes/BootScene.js';
 import TitleScene from './scenes/TitleScene.js';
 import ArenaScene from './scenes/ArenaScene.js';
 import { socket, session } from './net.js';
+import { ChromaticFX } from './systems/Gfx.js';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -19,6 +20,7 @@ const game = new Phaser.Game({
   },
   input: { gamepad: true },
   dom: { createContainer: true }, // campo de nombre en la pantalla de título
+  pipeline: { ChromaticFX }, // shader propio de post-procesado (systems/Gfx.js)
   scene: [BootScene, TitleScene, ArenaScene],
 });
 

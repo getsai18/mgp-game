@@ -37,9 +37,10 @@ export const EXPLOSION = {
 
 export const MAX_HP = 2;
 
-// Arma lanzada (E sin nada cerca): vuela girando y golpea. Por red viaja como arma 4 en 'player_hit'.
+// Arma lanzada (E sin nada cerca): vuela girando y golpea. Por red viaja como arma 8 en 'player_hit'
+// (fuera del rango 1-7 de las armas que caben en 'player_move', para no chocar con armas nuevas).
 export const THROW = { speed: 560, lift: 220, damage: 1, knockback: 300, lifeMs: 1500, harmfulSpeed: 260 };
-export const THROWN_WEAPON = 4;
+export const THROWN_WEAPON = 8;
 export const weaponName = (w) => (w === THROWN_WEAPON ? 'ARMA LANZADA' : WEAPONS[w]?.name ?? '???');
 
 export function randomWeaponType() {

@@ -3,7 +3,7 @@
 // Se dibuja por código (sin assets) en todas sus poses, para cada jugador, sin arma (puños)
 // y con arma (las dos manos al frente sujetándola; el arma la dibuja WeaponSystem).
 export const PLAYER_COLORS = [0x4fc3f7, 0xff6e6e];
-export const POSES = ['idle', 'run0', 'run1', 'jump', 'fall'];
+export const POSES = ['idle', 'run0', 'run1', 'jump', 'fall', 'wall']; // máx. 8 (3 bits en red)
 export const SKIN_W = 28;
 export const SKIN_H = 40;
 
@@ -20,6 +20,7 @@ const POSE_DATA = {
   run1: { hands: [[9, 28], [20, 28]], feet: [[12, 39], [16, 39]] },
   jump: { hands: [[4, 11], [24, 10]], feet: [[9, 35], [19, 36]] },
   fall: { hands: [[3, 15], [25, 15]], feet: [[11, 39], [17, 39]] },
+  wall: { hands: [[6, 22], [26, 12]], feet: [[9, 38], [23, 34]] }, // mano y pie delanteros apoyados en la pared
 };
 const ARMED_HANDS = [[17, 24], [22, 23]]; // con arma: ambas manos donde se dibuja el arma
 

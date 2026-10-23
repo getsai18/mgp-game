@@ -4,7 +4,9 @@
 //   A  aparición jugador 1         B  aparición jugador 2
 //   w / c  punto de aparición de armas (c = centro)
 //   Decorado sin colisión:  |  columna/poste   b  pared interior   T  pino   v  liana   i  antorcha
-// Cada tema define el estilo de dibujo, la zona de muerte ('water' o 'void') y su altura.
+// Cada tema define el estilo de dibujo, la zona de muerte ('water' o 'void') y su altura,
+// el color de luz ambiente (ambientLight) con el que se oscurece el mapa y la intensidad de las luces
+// (lightBoost) (systems/Lights.js).
 // Rotan cada ronda: mapa = (ronda - 1) % MAPS.length (los dos clientes conocen la ronda).
 import { TILE, GAME_HEIGHT } from './level.js';
 
@@ -14,7 +16,7 @@ const DECOR = '|bTvi';
 const RAW = [
   {
     name: 'NIEVE',
-    theme: { style: 'snow', death: 'water', deathY: 500, ambient: 'snow' },
+    theme: { style: 'snow', death: 'water', deathY: 500, ambient: 'snow', ambientLight: 0xeef4ff, lightBoost: 0.45 },
     rows: [
       '##........................................................##',
       '##........................................................##',
@@ -52,7 +54,7 @@ const RAW = [
   },
   {
     name: 'FÁBRICA',
-    theme: { style: 'factory', death: 'void', deathY: GAME_HEIGHT + 40, ambient: 'dust' },
+    theme: { style: 'factory', death: 'void', deathY: GAME_HEIGHT + 40, ambient: 'dust', ambientLight: 0xa4a4b8, lightBoost: 0.8 },
     rows: [
       '............................................................',
       '............................................................',
@@ -90,7 +92,7 @@ const RAW = [
   },
   {
     name: 'TEMPLO',
-    theme: { style: 'temple', death: 'void', deathY: GAME_HEIGHT + 40, ambient: 'fireflies' },
+    theme: { style: 'temple', death: 'void', deathY: GAME_HEIGHT + 40, ambient: 'fireflies', ambientLight: 0x9a8cbc, lightBoost: 1 },
     rows: [
       '............................................................',
       '............................................................',

@@ -369,7 +369,9 @@ export default class WeaponSystem {
       b.weaponType = w;
       b.owner = owner; // 'local' | 'remote' — la Fase 4 lo usa para los impactos
       b.dieAt = now + def.life * (def.pellets > 1 ? Phaser.Math.FloatBetween(0.8, 1.2) : 1);
+      if (def.explosive) this.scene.glow.attach(b, 55, 0xff7a30);
     }
+    this.scene.glow.flash(x, y, def.pellets > 1 ? 110 : 75, 0xffd070, 110);
     this.flash.explode(def.pellets > 1 ? 6 : 3, x, y);
     play(def.key, x, owner === 'remote' ? 0.75 : 1);
     if (!def.explosive) {
@@ -435,6 +437,8 @@ export default class WeaponSystem {
     this.sparks.explode(20, x, y);
     this.scene.cameras.main.shake(260, 0.022);
     this.scene.juice.shockwave(x, y, EXPLOSION.radius);
+    this.scene.juice.chromaPulse(0.008, 250);
+    this.scene.glow.flash(x, y, EXPLOSION.radius * 1.8, 0xff8a3a, 420, 0.6);
     this.scene.replay?.event('explosion', x, y);
     play('explosion', x);
 
@@ -485,6 +489,7 @@ export default class WeaponSystem {
 
   updateBullets(time) {
     for (const b of [...this.bullets.getChildren()]) {
+      this.scene.glow.follow(b);
       if (b.def.explosive) this.smoke.emitParticleAt(b.x - Math.cos(b.rotation) * 6, b.y - Math.sin(b.rotation) * 6);
       else this.scene.juice.tracer.emitParticleAt(b.x, b.y);
       const out = b.x < -40 || b.x > GAME_WIDTH + 40 || b.y < -200 || b.y > this.scene.map.deathY;

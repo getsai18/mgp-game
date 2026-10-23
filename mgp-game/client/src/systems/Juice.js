@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
+import { applyCameraFX, onQualityChange } from './Gfx.js';
 
 const MAX_CASINGS = 40;
 const TRAIL_MIN_SPEED = 380;
@@ -20,6 +21,10 @@ export default class Juice {
     this.scene = scene;
     const cam = scene.cameras.main;
     cam.setBounds(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    // Shaders de cámara (viñeta, brillo, aberración). Se rehacen si cambia la calidad gráfica.
+    this.chroma = applyCameraFX(scene, cam);
+    const offQuality = onQualityChange(() => (this.chroma = applyCameraFX(scene, cam)));
+    scene.events.once('shutdown', offQuality);
 
     // Cámara de interfaz: el zoom/shake de la principal no mueve el HUD.
     // Todo objeto nuevo la ignora salvo que se marque con ui().
@@ -96,6 +101,7 @@ export default class Juice {
     const cam = this.scene.cameras.main;
     this.hitStop(90);
     this.slowMo(650, 0.3);
+    this.chromaPulse(0.022, 700);
     cam.flash(90, 255, 255, 255);
     cam.pan(x, y, 180, 'Quad.easeOut');
     cam.zoomTo(1.3, 180, 'Quad.easeOut');
@@ -106,7 +112,17 @@ export default class Juice {
     });
   }
 
+  // Golpe de aberración cromática que se desvanece (solo con calidad alta).
+  chromaPulse(amount, ms = 300) {
+    const fx = this.chroma;
+    if (!fx || amount <= fx.amount) return;
+    this.scene.tweens.killTweensOf(fx);
+    fx.amount = amount;
+    this.scene.tweens.add({ targets: fx, amount: 0, duration: ms, ease: 'Quad.easeOut' });
+  }
+
   hurtFlash() {
+    this.chromaPulse(0.014, 320);
     this.scene.tweens.killTweensOf(this.vignette);
     this.vignette.setAlpha(1);
     this.scene.tweens.add({ targets: this.vignette, alpha: 0, duration: 350, ease: 'Quad.easeIn' });
@@ -131,9 +147,10 @@ export default class Juice {
       onUpdate: () => ring.clear().lineStyle(4, 0xffeecc, state.a).strokeCircle(x, y, state.r),
       onComplete: () => ring.destroy(),
     });
-    const flash = s.add.image(x, y, 'puff').setScale(radius / 3).setTint(0xffffcc).setDepth(depth)
+    // Textura 'light' (filtro lineal): un 'puff' de 8 px escalado salía como un cuadrado pixelado.
+    const flash = s.add.image(x, y, 'light').setScale(radius / 48).setTint(0xffffcc).setAlpha(0.8).setDepth(depth)
       .setBlendMode(Phaser.BlendModes.ADD);
-    s.tweens.add({ targets: flash, alpha: 0, scale: radius / 2, duration: 140, onComplete: () => flash.destroy() });
+    s.tweens.add({ targets: flash, alpha: 0, scale: radius / 32, duration: 140, onComplete: () => flash.destroy() });
     this.smokeLinger.explode(10, x, y);
   }
 

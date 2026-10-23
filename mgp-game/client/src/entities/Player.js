@@ -20,6 +20,12 @@ export const MOVE = {
   jumpBufferMs: 110,
   dropThroughMs: 250,
   impulseLockMs: 300, // tras un retroceso/explosión no se aplica la caída rápida
+  // Pared: empujando contra ella en el aire se resbala despacio; con salto se rebota hacia fuera.
+  wallSlideSpeed: 130,
+  wallJumpVx: 330,
+  wallJumpVy: 560,
+  wallCoyoteMs: 100, // se puede saltar un poco después de soltarse de la pared
+  wallJumpLockMs: 160, // tras rebotar, sin control horizontal (si no, se vuelve a pegar)
 };
 
 export { PLAYER_COLORS };
@@ -53,6 +59,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.jumping = false;
     this.wasOnGround = false;
     this.runFrameTimer = 0;
+    this.lastWallAt = -Infinity;
+    this.lastWallDir = 0;
+    this.wallJumpUntil = 0;
+    this.wallDustAt = 0;
     this.onDeath = null; // callback (player) para la escena
 
     this.dust = scene.add.particles(0, 0, 'pixel', {
@@ -85,13 +95,23 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     const vx = body.velocity.x;
     const overSpeed = Math.sign(vx) === dir && Math.abs(vx) > MOVE.maxSpeed;
-    if (dir !== 0 && !overSpeed) {
+    if (time < this.wallJumpUntil) {
+      // Recién rebotado en una pared: conservar el impulso.
+    } else if (dir !== 0 && !overSpeed) {
       body.velocity.x = approach(vx, dir * MOVE.maxSpeed, (onGround ? MOVE.groundAccel : MOVE.airAccel) * dt);
     } else {
       // Sin input (o empujado por encima del máximo): frenar con drag, conservando el impulso extra.
       body.velocity.x = approach(vx, dir * MOVE.maxSpeed * (overSpeed ? 1 : 0), (onGround ? MOVE.groundDrag : MOVE.airDrag) * dt);
     }
-    if (dir !== 0) this.setFlipX(dir < 0);
+    if (dir !== 0 && time >= this.wallJumpUntil) this.setFlipX(dir < 0);
+
+    // --- Pared (el bot no: su grafo de navegación no lo simula) ---
+    const wallDir = onGround || this.isBot ? 0 : body.blocked.left ? -1 : body.blocked.right ? 1 : 0;
+    const sliding = wallDir !== 0 && dir === wallDir && !input.down && body.velocity.y > 0;
+    if (sliding) {
+      this.lastWallAt = time;
+      this.lastWallDir = wallDir;
+    }
 
     // --- Salto (con coyote time y buffer) ---
     if (input.jumpPressed) this.jumpRequestedAt = time;
@@ -111,6 +131,18 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       play('jump', this.x, 0.8);
       // Stretch al despegar.
       this.scene.tweens.add({ targets: this, scaleY: 1.2, scaleX: 0.85, duration: 70, yoyo: true });
+    } else if (buffered && time - this.lastWallAt <= MOVE.wallCoyoteMs) {
+      // Salto de pared: hacia arriba y hacia fuera, mirando al lado contrario.
+      body.velocity.x = -this.lastWallDir * MOVE.wallJumpVx;
+      body.velocity.y = -MOVE.wallJumpVy;
+      this.setFlipX(this.lastWallDir > 0);
+      this.jumpRequestedAt = -Infinity;
+      this.lastWallAt = -Infinity;
+      this.wallJumpUntil = time + MOVE.wallJumpLockMs;
+      this.jumping = true;
+      this.dust.explode(8, this.x + this.lastWallDir * 7, this.y + 6);
+      play('jump', this.x, 0.8);
+      this.scene.tweens.add({ targets: this, scaleX: 1.2, scaleY: 0.85, duration: 70, yoyo: true });
     }
     // Salto variable: recorta una sola vez al soltar (no afecta impulsos de retroceso).
     if (this.jumping && !input.jumpHeld && body.velocity.y < 0) {
@@ -127,8 +159,16 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     } else {
       body.setGravityY(body.velocity.y > 0 ? MOVE.fallGravity : 0);
     }
+    if (sliding) {
+      body.setGravityY(0);
+      body.velocity.y = Math.min(body.velocity.y, MOVE.wallSlideSpeed);
+      if (time - this.wallDustAt > 90) {
+        this.wallDustAt = time;
+        this.dust.explode(1, this.x + wallDir * 7, this.y + 12);
+      }
+    }
 
-    this.updatePose(onGround, dir, delta);
+    this.updatePose(onGround, dir, delta, sliding);
 
     const { deathY, theme } = this.scene.map;
     if (body.bottom > deathY + 6) this.die(0, 0, theme.death);
@@ -150,8 +190,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     return this.body.blocked.down || this.body.touching.down;
   }
 
-  updatePose(onGround, dir, delta) {
-    if (!onGround) {
+  updatePose(onGround, dir, delta, sliding = false) {
+    if (sliding) {
+      this.pose = 'wall';
+    } else if (!onGround) {
       this.pose = this.body.velocity.y < 0 ? 'jump' : 'fall';
     } else if (dir !== 0) {
       this.runFrameTimer += delta;
@@ -234,6 +276,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.wasOnGround = false;
     this.dropUntil = 0;
     this.jumpRequestedAt = -Infinity;
+    this.lastWallAt = -Infinity;
+    this.wallJumpUntil = 0;
     // Parpadeo de reaparición.
     this.scene.tweens.add({ targets: this, alpha: 0.3, duration: 80, yoyo: true, repeat: 4 });
   }

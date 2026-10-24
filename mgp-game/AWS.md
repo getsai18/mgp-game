@@ -42,7 +42,7 @@ git archive --format=tar.gz -o app.tgz HEAD mgp-game
 scp -i ~/.ssh/arena-caos-key.pem app.tgz ubuntu@<IP>:~/app.tgz
 # en el servidor: extraer en ~/mgp-game/mgp-game, npm ci, npm run build, PORT=3000 pm2 restart arena --update-env
 ```
-(Si la llave da `error in libcrypto`, quitarle los fin de línea CRLF: `tr -d '' < llave.pem > llave-lf.pem`.)
+(Si la llave da `error in libcrypto`, quitarle los fin de línea CRLF: `tr -d '\r' < llave.pem > llave-lf.pem`.)
 
 ## Encender
 

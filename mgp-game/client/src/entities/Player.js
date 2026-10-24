@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { MAX_HP } from '../weapons.js';
-import { PLAYER_COLORS, SKIN_W, skinKey } from '../skins.js';
+import { PLAYER_COLORS, BODY_OFFSET, skinKey } from '../skins.js';
+import Cosmetics from '../systems/Cosmetics.js';
 import { play } from '../audio.js';
 
 // Tuning del movimiento. Gravedad base del mundo: 1400. (El grafo del bot lo usa para simular saltos.)
@@ -44,7 +45,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.color = PLAYER_COLORS[skin]; // barras de vida, estelas, textos
     this.pose = 'idle';
     this.armed = false; // con arma cambia la pose de las manos (lo actualiza WeaponSystem)
-    this.body.setSize(14, 36).setOffset((SKIN_W - 14) / 2, 4);
+    this.body.setSize(14, 36).setOffset(BODY_OFFSET.x, BODY_OFFSET.y);
+    this.setDepth(1);
+    this.cosmetics = new Cosmetics(scene, this);
     // Velocidad X máxima alta a propósito: el retroceso de las armas (Fase 3) la necesita.
     this.body.setMaxVelocity(1400, MOVE.maxFall);
     this.setCollideWorldBounds(true);
@@ -197,7 +200,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       this.pose = this.body.velocity.y < 0 ? 'jump' : 'fall';
     } else if (dir !== 0) {
       this.runFrameTimer += delta;
-      this.pose = Math.floor(this.runFrameTimer / 110) % 2 ? 'run1' : 'run0';
+      this.pose = `run${Math.floor(this.runFrameTimer / 85) % 4}`;
     } else {
       this.runFrameTimer = 0;
       this.pose = 'idle';

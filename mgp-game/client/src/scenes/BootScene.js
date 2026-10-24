@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { generateSkinTextures } from '../skins.js';
+import { generateSkinTextures, outlineTexture } from '../skins.js';
 import { generateLightTexture } from '../systems/Lights.js';
 
 // Genera todas las texturas por código: no hay assets que cargar.
@@ -71,6 +71,8 @@ export default class BootScene extends Phaser.Scene {
     g.clear();
 
     g.destroy();
+    // Armas con el mismo contorno que los personajes.
+    for (const key of ['pistol', 'shotgun', 'rocket']) outlineTexture(this, key);
     this.scene.start('Title');
   }
 }

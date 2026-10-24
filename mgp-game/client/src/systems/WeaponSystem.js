@@ -492,7 +492,7 @@ export default class WeaponSystem {
       this.scene.glow.follow(b);
       if (b.def.explosive) this.smoke.emitParticleAt(b.x - Math.cos(b.rotation) * 6, b.y - Math.sin(b.rotation) * 6);
       else this.scene.juice.tracer.emitParticleAt(b.x, b.y);
-      const out = b.x < -40 || b.x > GAME_WIDTH + 40 || b.y < -200 || b.y > this.scene.map.deathY;
+      const out = b.x < -40 || b.x > this.scene.map.width + 40 || b.y < -200 || b.y > this.scene.map.deathY;
       if (time >= b.dieAt || out) {
         if (b.def.explosive && !out) this.explode(b.x, b.y, b.owner);
         b.destroy();

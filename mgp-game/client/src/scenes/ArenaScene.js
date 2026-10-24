@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
+import { GAME_WIDTH } from '../level.js';
 import { MAPS } from '../maps.js';
 import { drawMapTiles, drawMapBackground } from '../mapTiles.js';
 import { socket, session, leaveRoom } from '../net.js';
@@ -15,8 +15,10 @@ import Stats from '../systems/Stats.js';
 import BotBrain, { createBot, BOT_NAME } from '../systems/Bot.js';
 import { watchFps, toggleQuality, isHighQuality } from '../systems/Gfx.js';
 import Lights from '../systems/Lights.js';
+import CameraDirector from '../systems/CameraDirector.js';
+import createMapFx from '../systems/MapFx.js';
 import { MAX_HP, weaponName } from '../weapons.js';
-import { play, startMusic, toggleMute, isMuted } from '../audio.js';
+import { play, startMusic, toggleMute, isMuted, setAudioListener } from '../audio.js';
 import { isTouch, showTouchControls, hideTouchControls, setSoundIcon, toggleFullscreen } from '../touch.js';
 
 const PLACES = { water: 'AL AGUA', void: 'AL VACÍO', spikes: 'A LOS PINCHOS', hit: '' };
@@ -50,6 +52,9 @@ export default class ArenaScene extends Phaser.Scene {
     this.platforms = this.physics.add.staticGroup();
     this.hazards = this.physics.add.staticGroup(); // pinchos
     this.mapObjects = []; // decorado vivo del mapa actual (agua, partículas): se destruye al cambiar
+    this.camDirector = new CameraDirector(this);
+    setAudioListener(this.cameras.main);
+    this.events.once('shutdown', () => setAudioListener(null));
     this.juice = new Juice(this, this.platforms);
     this.glow = new Lights(this); // (this.lights es el plugin de luces de Phaser)
     this.createSplashes();
@@ -71,7 +76,7 @@ export default class ArenaScene extends Phaser.Scene {
     if (this.mode === 'bot') this.round.startMatch(); // el bot ya existe: arrancar la partida
     this.hpBars = this.add.graphics().setDepth(20);
     const nameStyle = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 };
-    this.nameTags = [this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20), this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20)];
+    this.nameTags = [0, 1].map(() => this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20).setResolution(2)); // nítidos con zoom
   }
 
   update(time, delta) {
@@ -89,6 +94,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.banter.update(time);
     this.sendState(time);
     this.drawHpBars();
+    this.camDirector.update(delta);
     if (this.round.phase !== 'solo') {
       const w = this.weapons;
       this.replay.record([this.player, this.remote, w.localHeld, w.remoteHeld, ...w.bullets.getChildren(), ...w.thrown.getChildren()]);
@@ -130,7 +136,7 @@ export default class ArenaScene extends Phaser.Scene {
     if (theme.death === 'water' && y > deathY - 40) {
       this.waterSplash.explode(45, x, deathY);
       play('splash', x);
-    } else if (y < GAME_HEIGHT - 10) {
+    } else if (y < this.map.height - 10) {
       this.weapons.blood.explode(45, x, y);
       play('death', x);
     } else {
@@ -143,7 +149,7 @@ export default class ArenaScene extends Phaser.Scene {
     // en el host la muerte del rival se ve ~150 ms tarde (interpolación) y el veredicto puede llegar antes.
     if (this.round && this.round.phase !== 'solo' && !this.killCamPlayed) {
       this.killCamPlayed = true;
-      this.juice.killCam(x, Phaser.Math.Clamp(y, 60, Math.min(deathY, GAME_HEIGHT) - 50));
+      this.juice.killCam(x, Phaser.Math.Clamp(y, 60, Math.min(deathY, this.map.height) - 50));
     }
   }
 
@@ -191,7 +197,7 @@ export default class ArenaScene extends Phaser.Scene {
     const { deathY, theme, spikes } = this.map;
     let cause = 'hit';
     if (theme.death === 'water' && y > deathY - 40) cause = 'water';
-    else if (y > GAME_HEIGHT - 10) cause = 'void';
+    else if (y > this.map.height - 10) cause = 'void';
     else if (spikes.some((s) => x > s.x - 10 && x < s.x + s.w + 10 && Math.abs(y + 20 - s.y) < 30)) cause = 'spikes';
     const hit = this.recentHit(this.lastHitOnRemote);
     const myColor = `#${PLAYER_COLORS[session.playerIndex].toString(16)}`;
@@ -249,53 +255,46 @@ export default class ArenaScene extends Phaser.Scene {
       this.hazards.add(this.add.rectangle(sp.x + sp.w / 2, sp.y + sp.h / 2, sp.w, sp.h).setVisible(false));
     }
 
+    // Mundo del tamaño del mapa (sin suelo ni techo: ver setBoundsCollision en create).
+    this.physics.world.setBounds(0, 0, map.width, map.height);
+    this.camDirector.setWorld(map.width, map.height);
+
     this.mapBg?.destroy();
+    this.mapFar?.destroy();
     this.mapLayer?.destroy();
-    this.mapBg = bake(this, drawMapBackground(this, map)).setDepth(-10);
-    this.mapLayer = bake(this, drawMapTiles(this, map)).setDepth(0);
+    // Fondo en dos capas: la lejana se mueve menos que la cámara (paralaje) y da profundidad.
+    const bg = drawMapBackground(this, map);
+    this.mapFar = bake(this, bg.far, map.width, map.height).setDepth(-11).setScrollFactor(0.55);
+    this.mapBg = bake(this, bg.near, map.width, map.height).setDepth(-10);
+    this.mapLayer = bake(this, drawMapTiles(this, map), map.width, map.height).setDepth(0);
 
     for (const obj of this.mapObjects) obj.destroy();
     this.mapObjects = this.glow.setMap(map);
     this.createDeathZone(map);
-    this.createAmbient(map);
+    this.mapObjects.push(...createMapFx(this, map, bg.anchors)); // clima, antorchas y extras del tema
     startMusic(index); // cada mapa transpone la música
   }
 
   // Agua helada (con oleaje y témpanos) o vacío (oscurece hacia abajo).
   createDeathZone(map) {
     const keep = (obj) => (this.mapObjects.push(obj), obj);
+    const W = map.width;
     if (map.theme.death === 'water') {
-      const h = GAME_HEIGHT - map.deathY;
-      keep(this.add.rectangle(GAME_WIDTH / 2, map.deathY + h / 2, GAME_WIDTH, h, 0x2f6d96, 0.92).setDepth(10));
-      keep(this.add.rectangle(GAME_WIDTH / 2, map.deathY + 1, GAME_WIDTH, 3, 0xcfefff).setDepth(10));
-      const shine = keep(this.add.rectangle(GAME_WIDTH / 2, map.deathY + 8, GAME_WIDTH, 2, 0x8fd0f5, 0.6).setDepth(10));
+      // Agua (helada o de alcantarilla, según el tema): color, espuma y lo que flota.
+      const w = map.theme.water ?? { body: 0x2f6d96, edge: 0xcfefff, shine: 0x8fd0f5, floe: 0xf4fbff };
+      const h = map.height - map.deathY + 40;
+      keep(this.add.rectangle(W / 2, map.deathY + h / 2, W, h, w.body, 0.92).setDepth(10));
+      keep(this.add.rectangle(W / 2, map.deathY + 1, W, 3, w.edge).setDepth(10));
+      const shine = keep(this.add.rectangle(W / 2, map.deathY + 8, W, 2, w.shine, 0.6).setDepth(10));
       this.tweens.add({ targets: shine, y: map.deathY + 14, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      for (let i = 0; i < 6; i++) {
-        const floe = keep(this.add.rectangle(Phaser.Math.Between(0, GAME_WIDTH), map.deathY + 4, Phaser.Math.Between(20, 44), 4, 0xf4fbff).setDepth(10));
+      for (let i = 0; i < 9; i++) {
+        const floe = keep(this.add.rectangle(Phaser.Math.Between(0, W), map.deathY + 4, Phaser.Math.Between(20, 44), 4, w.floe).setDepth(10));
         this.tweens.add({ targets: floe, x: floe.x + Phaser.Math.Between(-60, 60), duration: Phaser.Math.Between(3000, 6000), yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
       }
     } else {
       const g = this.make.graphics({ add: false });
-      g.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0, 0, 0.75, 0.75).fillRect(0, GAME_HEIGHT - 90, GAME_WIDTH, 90);
-      keep(bake(this, g).setDepth(9));
-    }
-  }
-
-  // Ambiente de cada mapa: nieve, polvo en la luz, luciérnagas y fuego de antorchas.
-  createAmbient(map) {
-    const keep = (obj) => (this.mapObjects.push(obj), obj);
-    const ambient = {
-      snow: { x: { min: 0, max: GAME_WIDTH }, y: -10, speedY: { min: 25, max: 60 }, speedX: { min: -20, max: 20 }, lifespan: 14000, scale: { min: 0.4, max: 1 }, alpha: { min: 0.6, max: 1 }, tint: 0xffffff, frequency: 70 },
-      dust: { x: { min: 160, max: 800 }, y: { min: 90, max: 300 }, speedX: { min: -6, max: 6 }, speedY: { min: -4, max: 4 }, lifespan: 5000, scale: 0.5, alpha: { start: 0, end: 0.5, ease: 'Sine.easeInOut' }, tint: 0xfff3d0, frequency: 220 },
-      fireflies: { x: { min: 0, max: GAME_WIDTH }, y: { min: 120, max: 470 }, speedX: { min: -15, max: 15 }, speedY: { min: -12, max: 12 }, lifespan: 3500, scale: { start: 0.7, end: 0.2 }, alpha: { start: 1, end: 0 }, tint: [0xd8ff6a, 0xfff07a], frequency: 160, blendMode: 'ADD' },
-    }[map.theme.ambient];
-    if (ambient) keep(this.add.particles(0, 0, 'pixel', ambient).setDepth(9));
-
-    for (const d of map.decor.filter((t) => t.type === 'i')) {
-      keep(this.add.particles(d.c * 16 + 8, d.r * 16 + 3, 'puff', {
-        speedY: { min: -45, max: -20 }, speedX: { min: -8, max: 8 }, lifespan: { min: 250, max: 450 },
-        scale: { start: 0.9, end: 0 }, tint: [0xffe066, 0xffa030, 0xff5a00], frequency: 40, blendMode: 'ADD',
-      }).setDepth(5));
+      g.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0, 0, 0.8, 0.8).fillRect(0, map.height - 110, W, 110);
+      keep(bake(this, g, W, map.height).setDepth(9));
     }
   }
 

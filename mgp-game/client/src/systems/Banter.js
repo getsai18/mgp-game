@@ -42,7 +42,7 @@ export default class Banter {
     const text = s.add.text(target.x, target.y - 44, TAUNTS[i], {
       fontFamily: 'monospace', fontSize: '12px', fontStyle: 'bold', color: '#111111',
       backgroundColor: '#ffffff', padding: { x: 5, y: 3 },
-    }).setOrigin(0.5, 1).setDepth(30).setScale(0);
+    }).setOrigin(0.5, 1).setDepth(30).setScale(0).setResolution(2);
     s.tweens.add({ targets: text, scale: 1, duration: 160, ease: 'Back.Out' });
     s.tweens.add({ targets: target, scaleY: 1.25, scaleX: 0.85, duration: 90, yoyo: true, repeat: 1 });
     this.bubbles.push({ target, text, until: s.time.now + BUBBLE_MS });

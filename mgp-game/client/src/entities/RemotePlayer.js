@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { PLAYER_COLORS, POSES, SKIN_W, skinKey } from '../skins.js';
+import { PLAYER_COLORS, POSES, BODY_OFFSET, skinKey } from '../skins.js';
+import Cosmetics from '../systems/Cosmetics.js';
 
 // Formato de red de 'player_move' (array para que pese ~25 bytes):
 //   [x, y, vx, vy, flags]
@@ -46,7 +47,10 @@ export default class RemotePlayer extends Phaser.Physics.Arcade.Sprite {
 
     this.skin = skin;
     this.color = PLAYER_COLORS[skin];
-    this.body.setSize(14, 36).setOffset((SKIN_W - 14) / 2, 4);
+    this.body.setSize(14, 36).setOffset(BODY_OFFSET.x, BODY_OFFSET.y);
+    this.setDepth(1);
+    this.pose = 'idle';
+    this.cosmetics = new Cosmetics(scene, this);
     this.body.setAllowGravity(false);
     this.body.moves = false;
     this.setVisible(false); // hasta recibir el primer estado
@@ -92,6 +96,7 @@ export default class RemotePlayer extends Phaser.Physics.Arcade.Sprite {
     }
 
     this.setPosition(x, y);
+    this.pose = ref.pose;
     this.setTexture(skinKey(this.skin, ref.pose, ref.weaponType > 0));
     this.setFlipX(ref.flip);
     this.weaponType = ref.weaponType;

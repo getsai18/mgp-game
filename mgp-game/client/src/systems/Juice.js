@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
+import { GAME_WIDTH, GAME_HEIGHT, CANVAS_WIDTH, CANVAS_HEIGHT, RENDER_SCALE } from '../level.js';
 import { applyCameraFX, onQualityChange } from './Gfx.js';
 
 const MAX_CASINGS = 40;
@@ -7,9 +7,15 @@ const TRAIL_MIN_SPEED = 380;
 const TRAIL_EVERY_MS = 35;
 
 // Phaser (WebGL) re-tesela un Graphics en cada frame: lo estático se dibuja una vez en un RenderTexture.
-export function bake(scene, graphics) {
-  const rt = scene.add.renderTexture(0, 0, GAME_WIDTH, GAME_HEIGHT).setOrigin(0);
+// Tamaño por defecto: la interfaz (960x540); los mapas pasan el suyo.
+export function bake(scene, graphics, width = GAME_WIDTH, height = GAME_HEIGHT) {
+  const rt = scene.add.renderTexture(0, 0, width, height).setOrigin(0);
   rt.draw(graphics);
+  // Textos horneados (letreros de los mapas): se dibujan encima y se descartan.
+  for (const t of graphics.stamps ?? []) {
+    rt.draw(t);
+    t.destroy();
+  }
   graphics.destroy();
   return rt;
 }
@@ -19,8 +25,7 @@ export function bake(scene, graphics) {
 export default class Juice {
   constructor(scene, platforms) {
     this.scene = scene;
-    const cam = scene.cameras.main;
-    cam.setBounds(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    const cam = scene.cameras.main; // límites y encuadre: CameraDirector (cambian con cada mapa)
     // Shaders de cámara (viñeta, brillo, aberración). Se rehacen si cambia la calidad gráfica.
     this.chroma = applyCameraFX(scene, cam);
     const offQuality = onQualityChange(() => (this.chroma = applyCameraFX(scene, cam)));
@@ -28,7 +33,9 @@ export default class Juice {
 
     // Cámara de interfaz: el zoom/shake de la principal no mueve el HUD.
     // Todo objeto nuevo la ignora salvo que se marque con ui().
-    this.uiCam = scene.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT).setName('ui');
+    // Con zoom RENDER_SCALE el HUD se sigue colocando en coordenadas de 960x540.
+    this.uiCam = scene.cameras.add(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).setName('ui');
+    this.uiCam.setZoom(RENDER_SCALE).centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
     for (const obj of scene.children.list) this.uiCam.ignore(obj);
     const onAdded = (obj) => !obj.isUI && this.uiCam.ignore(obj);
     scene.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, onAdded);
@@ -58,6 +65,7 @@ export default class Juice {
 
   ui(obj) {
     obj.isUI = true;
+    obj.setResolution?.(RENDER_SCALE); // textos nítidos con el zoom de la cámara de interfaz
     obj.cameraFilter &= ~this.uiCam.id;
     this.scene.cameras.main.ignore(obj);
     return obj;
@@ -94,22 +102,16 @@ export default class Juice {
     }
   }
 
-  // Muerte que decide la ronda: congelado, cámara lenta, zoom al punto y vuelta.
+  // Muerte que decide la ronda: congelado, cámara lenta, zoom al punto y vuelta (CameraDirector).
   killCam(x, y) {
     if (this.killCamBusy) return;
     this.killCamBusy = true;
-    const cam = this.scene.cameras.main;
     this.hitStop(90);
     this.slowMo(650, 0.3);
     this.chromaPulse(0.022, 700);
-    cam.flash(90, 255, 255, 255);
-    cam.pan(x, y, 180, 'Quad.easeOut');
-    cam.zoomTo(1.3, 180, 'Quad.easeOut');
-    this.scene.time.delayedCall(750, () => {
-      cam.pan(GAME_WIDTH / 2, GAME_HEIGHT / 2, 400, 'Quad.easeInOut');
-      cam.zoomTo(1, 400, 'Quad.easeInOut');
-      this.scene.time.delayedCall(400, () => (this.killCamBusy = false));
-    });
+    this.scene.cameras.main.flash(90, 255, 255, 255);
+    this.scene.camDirector?.focusOn(x, y, 1.3, 750);
+    this.scene.time.delayedCall(1150, () => (this.killCamBusy = false));
   }
 
   // Golpe de aberración cromática que se desvanece (solo con calidad alta).

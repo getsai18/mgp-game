@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
+import { GAME_WIDTH, GAME_HEIGHT, RENDER_SCALE } from '../level.js';
 import { MAPS } from '../maps.js';
 import { drawMapBackground } from '../mapTiles.js';
 import { bake } from '../systems/Juice.js';
@@ -19,7 +19,14 @@ export default class TitleScene extends Phaser.Scene {
 
   create() {
     this.starting = false;
-    bake(this, drawMapBackground(this, MAPS[0]));
+    // El lienzo es RENDER_SCALE veces la interfaz: con este zoom el menú se sigue maquetando en 960x540.
+    this.cameras.main.setZoom(RENDER_SCALE).centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    // Fondo del primer mapa reducido a la vista (con el zoom de la cámara queda píxel a píxel).
+    const map = MAPS[0];
+    const bg = drawMapBackground(this, map);
+    const fit = GAME_WIDTH / map.width;
+    bake(this, bg.far, map.width, map.height).setScale(fit);
+    bake(this, bg.near, map.width, map.height).setScale(fit);
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x0b0b14, 0.35);
     this.add.particles(0, 0, 'pixel', {
       x: { min: 0, max: GAME_WIDTH }, y: -10, speedY: { min: 25, max: 60 }, speedX: { min: -20, max: 20 },
@@ -45,6 +52,7 @@ export default class TitleScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-N', () => this.toggleSound());
     this.input.keyboard.on('keydown-ENTER', () => this.start('online'));
     this.input.gamepad?.once('down', () => this.start('online'));
+    for (const o of this.children.list) o.setResolution?.(RENDER_SCALE); // textos nítidos con el zoom
   }
 
   createLogo() {

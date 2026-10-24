@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, TILE } from '../level.js';
+import { TILE } from '../level.js';
 import { isHighQuality, onQualityChange } from './Gfx.js';
 
 // Iluminación barata (sin Light2D ni mapas de normales):
@@ -23,6 +23,16 @@ export function generateLightTexture(scene) {
   // El juego usa pixelArt (filtro NEAREST): la luz, escalada, saldría en anillos escalonados.
   scene.textures.get('light').setFilter(Phaser.Textures.FilterMode.LINEAR);
 }
+
+// Luz de cada tipo de lámpara: color (o colores alternos), radio, desplazamiento vertical y animación.
+const LAMPS = {
+  torch: { color: 0xff9a40, radius: 110, dy: 2, alpha: 0.9, mode: 'flicker' },
+  lantern: { color: 0xffc070, radius: 120, dy: -16, alpha: 0.85, mode: 'flicker' },
+  beacon: { color: 0xffa020, radius: 120, dy: 7, alpha: 0.9, mode: 'pulse' },
+  wall: { color: 0xffd890, radius: 95, dy: 8, alpha: 0.8, mode: 'steady' },
+  spot: { color: [0xff3a6a, 0x3aa8ff, 0xffd23a, 0x8a5aff], radius: 120, dy: 12, alpha: 0.9, mode: 'steady' },
+  street: { color: 0xfff2c0, radius: 90, dy: -24, alpha: 0.6, mode: 'steady' },
+};
 
 export default class Lights {
   constructor(scene) {
@@ -48,16 +58,20 @@ export default class Lights {
     const objects = [];
     const ambient = map.theme.ambientLight ?? 0xffffff;
     this.boost = map.theme.lightBoost ?? 1;
-    this.dark = s.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, ambient)
+    // Margen alrededor del mapa: con la sacudida de cámara no debe asomar el borde de la capa.
+    this.dark = s.add.rectangle(map.width / 2, map.height / 2, map.width + 400, map.height + 400, ambient)
       .setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(DEPTH_DARK).setVisible(this.enabled);
     objects.push(this.dark);
 
-    this.torches = map.decor.filter((d) => d.type === 'i').map((d) => {
+    // Cada tema ilumina sus lámparas ('i') a su manera (ver LAMPS).
+    const lamp = LAMPS[map.theme.lamp ?? 'torch'];
+    this.torches = map.decor.filter((d) => d.type === 'i').map((d, i) => {
       const x = d.c * TILE + TILE / 2;
-      const y = d.r * TILE + 2;
-      const img = this.light(x, y, 110, 0xff9a40, 0.9);
+      const y = d.r * TILE + lamp.dy;
+      const color = Array.isArray(lamp.color) ? lamp.color[i % lamp.color.length] : lamp.color;
+      const img = this.light(x, y, lamp.radius, color, lamp.alpha);
       objects.push(img);
-      return { img, base: 110 / LIGHT_TEX_R, seed: Math.random() * 100 };
+      return { img, base: lamp.radius / LIGHT_TEX_R, seed: Math.random() * 100, mode: lamp.mode, alpha: lamp.alpha };
     });
     return objects;
   }
@@ -72,8 +86,16 @@ export default class Lights {
   update(time) {
     if (!this.enabled) return;
     for (const t of this.torches) {
-      const f = Math.sin(time * 0.011 + t.seed) * 0.05 + Math.sin(time * 0.029 + t.seed * 2) * 0.04;
-      t.img.setScale(t.base * (1 + f)).setAlpha(0.8 + f * 1.5);
+      if (t.mode === 'pulse') {
+        // Baliza giratoria: destello cada ~1.2 s.
+        const k = Math.max(0, Math.sin(time * 0.0052 + t.seed)) ** 6;
+        t.img.setScale(t.base * (0.7 + k * 0.5)).setAlpha(0.25 + k * 0.75);
+      } else if (t.mode === 'steady') {
+        t.img.setAlpha(t.alpha * (0.95 + Math.sin(time * 0.003 + t.seed) * 0.05));
+      } else {
+        const f = Math.sin(time * 0.011 + t.seed) * 0.05 + Math.sin(time * 0.029 + t.seed * 2) * 0.04;
+        t.img.setScale(t.base * (1 + f)).setAlpha(0.8 + f * 1.5);
+      }
     }
   }
 

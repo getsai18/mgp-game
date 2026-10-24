@@ -44,11 +44,19 @@ export function unlockAudio() {
   if (ZZFX.audioContext.state !== 'running') ZZFX.audioContext.resume();
 }
 
-export function play(name, x = GAME_WIDTH / 2, volume = 1) {
+// Paneo relativo a lo que enseña la cámara (la escena de juego la registra); sin cámara, la pantalla.
+let listener = null;
+export function setAudioListener(cam) {
+  listener = cam;
+}
+
+export function play(name, x, volume = 1) {
   if (muted || ZZFX.audioContext.state !== 'running') return;
   const sound = ensureSfx()[name];
   if (!sound) return;
-  const pan = Math.max(-0.8, Math.min(0.8, (x / GAME_WIDTH) * 2 - 1));
+  const view = listener?.worldView;
+  const rel = x === undefined ? 0 : view?.width ? (x - view.centerX) / (view.width / 2) : (x / GAME_WIDTH) * 2 - 1;
+  const pan = Math.max(-0.8, Math.min(0.8, rel));
   sound.play(volume, 1, 1, pan);
 }
 

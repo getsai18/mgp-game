@@ -14,6 +14,7 @@ export default class Replay {
     this.events = []; // { t, type, x, y }
     this.playing = false;
     this.objects = [];
+    this.focus = []; // posiciones de los jugadores en la foto actual: la cámara las encuadra
   }
 
   record(sources) {
@@ -24,7 +25,8 @@ export default class Replay {
       if (!o || !o.active || !o.visible || o.alpha === 0) continue;
       shots.push([o.texture.key, o.x, o.y, o.flipX, o.angle, o.isTinted ? o.tintTopLeft : -1, o.alpha, o.scaleX, o.scaleY, o.depth]);
     }
-    this.frames.push({ t, s: shots });
+    const p = sources.slice(0, 2).filter((o) => o?.active && o.visible && o.alive !== false).map((o) => ({ x: o.x, y: o.y }));
+    this.frames.push({ t, s: shots, p });
     while (this.frames.length && t - this.frames[0].t > KEEP_MS) this.frames.shift();
     while (this.events.length && t - this.events[0].t > KEEP_MS) this.events.shift();
   }
@@ -46,7 +48,8 @@ export default class Replay {
 
     const s = this.scene;
     const keep = (obj) => (this.objects.push(obj), obj);
-    keep(s.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH * 2, GAME_HEIGHT * 2, 0x05050c, 0.8).setDepth(60));
+    const { width: mw, height: mh } = s.map;
+    keep(s.add.rectangle(mw / 2, mh / 2, mw + 800, mh + 800, 0x05050c, 0.8).setDepth(60));
     for (const [y, oy] of [[0, 0], [GAME_HEIGHT, 1]]) keep(s.juice.ui(s.add.rectangle(GAME_WIDTH / 2, y, GAME_WIDTH, 80, 0x000000).setOrigin(0.5, oy).setDepth(140)));
     const label = keep(s.juice.ui(s.add.text(20, 52, '● REPETICIÓN  x' + speed, {
       fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#ff4455', stroke: '#000', strokeThickness: 3,
@@ -62,6 +65,8 @@ export default class Replay {
       let i = 0;
       while (i + 1 < frames.length && frames[i + 1].t <= rt) i++;
       const shots = frames[i].s;
+      // Las dos primeras fotos son los jugadores (orden de ArenaScene.update): la cámara los sigue.
+      this.focus = frames[i].p;
       shots.forEach((d, k) => {
         if (!pool[k]) pool[k] = keep(s.add.image(0, 0, d[0]));
         const img = pool[k].setVisible(true).setTexture(d[0]).setPosition(d[1], d[2]).setFlipX(d[3]).setAngle(d[4])
@@ -100,5 +105,6 @@ export default class Replay {
       this.scene.weapons.blood.setDepth(6);
     }
     this.playing = false;
+    this.focus = [];
   }
 }

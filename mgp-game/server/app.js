@@ -9,7 +9,7 @@ import { Server } from 'socket.io';
 import GameRoom from './game.js';
 import Telemetry from './telemetry.js';
 import {
-  parse, moveSchema, shootSchema, spawnSchema, pickupSchema, throwSchema, hitSchema, deathSchema,
+  parse, moveSchema, shootSchema, spawnSchema, pickupSchema, throwSchema, hitSchema,
   infoSchema, tauntSchema, pingSchema, roomSchema, readySchema, seedSchema,
 } from './schemas.js';
 
@@ -221,10 +221,17 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
     });
 
     onGame('player_move', moveSchema, (room, d) => {
-      if (room.onMove(socket.id, d)) socket.volatile.to(room.id).emit('player_move', d);
+      const verdict = room.onMove(socket.id, d);
+      if (verdict === 'ok') socket.volatile.to(room.id).emit('player_move', d);
+      // Dentro o a través de una pared: el servidor devuelve al jugador a su última posición válida.
+      else if (verdict === 'correct') {
+        const { x, y } = room.player(socket.id).pos;
+        socket.emit('player_correct', { x, y });
+      }
     });
     onGame('weapon_spawn', spawnSchema, (room, d) => {
       if (room.onSpawn(socket.id, d)) socket.to(room.id).emit('weapon_spawn', d);
+      else socket.emit('weapon_spawn_denied', { id: d.id }); // el host la quita: no existe para el servidor
     });
     onGame('weapon_pickup', pickupSchema, (room, d) => {
       if (room.onPickup(socket.id, d)) socket.to(room.id).emit('weapon_pickup', d);
@@ -240,7 +247,6 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
       const res = room.onHit(socket.id, d);
       if (res) io.to(res.victim.id).emit('player_hit', res.hit);
     });
-    onGame('round_end', deathSchema, (room, d) => room.onDeathReport(socket.id, d));
     onGame('player_info', infoSchema, (room, d) => {
       const p = room.player(socket.id);
       if (p) p.name = d.name;

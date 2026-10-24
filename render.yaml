@@ -4,6 +4,7 @@ services:
     name: arena-caos
     runtime: node
     plan: free
+    region: virginia
     rootDir: mgp-game
     buildCommand: npm ci && npm run build
     startCommand: npm start

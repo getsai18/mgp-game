@@ -1,0 +1,14 @@
+# El plan gratuito de Render duerme el servicio tras 15 min sin tráfico (y el primer acceso tarda ~1 min).
+# Un ping a /health cada 10 min lo mantiene despierto para la evaluación.
+name: Keep alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --max-time 90 https://arena-caos.onrender.com/health

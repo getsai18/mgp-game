@@ -1,4 +1,4 @@
-import { POSES } from './skins.js';
+import { POSES, SKIN_H, BODY_OFFSET } from './skins.js';
 
 // Estado del jugador que viaja por red y su interpolación. Sin Phaser: lo usan RemotePlayer,
 // el servidor (validación) y las pruebas unitarias.
@@ -8,6 +8,9 @@ import { POSES } from './skins.js';
 //   flags: bit0 = flipX, bit1 = vivo, bits2-4 = pose, bits5-7 = arma (0 = ninguna, hasta 7 tipos),
 //          bit8 = apunta abajo, bits9-10 = vida
 const POSE_INDEX = Object.fromEntries(POSES.map((key, i) => [key, i]));
+
+// Del centro del sprite a los pies (borde inferior del cuerpo físico) con escala 1.
+export const FEET_Y = BODY_OFFSET.y + 36 - SKIN_H / 2;
 
 export const SNAP_DISTANCE = 150; // saltos mayores (reaparición) no se interpolan
 export const MAX_EXTRAPOLATE_MS = 120; // si se corta el flujo, seguir con la última velocidad un poco
@@ -20,8 +23,14 @@ export function packState(player, weaponType = 0, aimDown = false) {
     ((weaponType & 7) << 5) |
     (aimDown ? 256 : 0) |
     ((player.hp & 3) << 9);
-  const { x: vx, y: vy } = player.body.velocity;
-  return [Math.round(player.x), Math.round(player.y), Math.round(vx), Math.round(vy), flags];
+  // Posición del CUERPO FÍSICO, no del sprite: el sprite se sincroniza después y puede ir un paso de
+  // física por detrás, y al estirarse/aplastarse cambia su centro. Anclada a los pies: el servidor
+  // (server/arbiter.js) y el rival ven exactamente dónde pisa.
+  const body = player.body;
+  const x = body.center?.x ?? player.x;
+  const y = body.bottom !== undefined ? body.bottom - FEET_Y : player.y;
+  const { x: vx, y: vy } = body.velocity;
+  return [Math.round(x), Math.round(y), Math.round(vx), Math.round(vy), flags];
 }
 
 export function unpackState([x, y, vx, vy, flags]) {

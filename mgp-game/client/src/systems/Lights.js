@@ -59,7 +59,8 @@ export default class Lights {
     const ambient = map.theme.ambientLight ?? 0xffffff;
     this.boost = map.theme.lightBoost ?? 1;
     // Margen alrededor del mapa: con la sacudida de cámara no debe asomar el borde de la capa.
-    this.dark = s.add.rectangle(map.width / 2, map.height / 2, map.width + 400, map.height + 400, ambient)
+    // Imagen (no rectángulo): en Canvas 2D las formas ignoran el MULTIPLY y taparían el mapa.
+    this.dark = s.add.image(map.width / 2, map.height / 2, 'pixel').setDisplaySize(map.width + 400, map.height + 400).setTint(ambient)
       .setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(DEPTH_DARK).setVisible(this.enabled);
     objects.push(this.dark);
 

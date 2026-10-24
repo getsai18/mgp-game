@@ -15,9 +15,10 @@ describe('Esquemas Zod de payload', () => {
   });
 
   it('limita el daño y las balas que puede declarar un cliente', () => {
-    expect(parse(hitSchema, { d: 1, kx: 100, ky: -80, w: 1 })).not.toBeNull();
-    expect(parse(hitSchema, { d: 99, kx: 0, ky: 0, w: 1 })).toBeNull();
-    expect(parse(hitSchema, { d: 1, kx: 5000, ky: 0, w: 1 })).toBeNull();
+    expect(parse(hitSchema, { kx: 100, ky: -80, w: 1 })).not.toBeNull();
+    expect(parse(hitSchema, { kx: 0, ky: 0, w: 3, ex: 400, ey: 300 })).not.toBeNull();
+    expect(parse(hitSchema, { d: 2, kx: 0, ky: 0, w: 1 })).toBeNull(); // el cliente no declara daño
+    expect(parse(hitSchema, { kx: 5000, ky: 0, w: 1 })).toBeNull();
     expect(parse(shootSchema, { w: 2, x: 10, y: 10, a: new Array(30).fill(0) })).toBeNull(); // 30 perdigones
   });
 

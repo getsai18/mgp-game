@@ -1,22 +1,31 @@
-import { WEAPONS, MAX_HP, THROWN_WEAPON, THROW, maxHitDamage, weaponRange } from '../client/src/weapons.js';
+import { WEAPONS, MAX_HP, THROWN_WEAPON, THROW, EXPLOSION, weaponRange, explosionDamage } from '../client/src/weapons.js';
 import { WINS_TO_MATCH, DRAW_WINDOW_MS, NEXT_ROUND_MS, NEXT_MATCH_MS } from '../client/src/rules.js';
+import { MAPS, mapForRound } from '../client/src/maps.js';
+import { illegalMove, environmentDeath, lineOfSight, rayDistance } from './arbiter.js';
 
 // Sala de juego con AUTORIDAD DEL SERVIDOR sobre lo que decide la partida:
-//  - vida de cada jugador y cálculo de daño (los clientes solo "proponen" impactos);
+//  - vida y DAÑO: el cliente solo dice "le di con el arma w"; el servidor comprueba con su copia del
+//    mapa y de las posiciones que el disparo pudo llegar (trayectoria, alcance, sin paredes en medio)
+//    y calcula él mismo el daño (por arma, o por distancia al centro de la explosión);
 //  - inventario: qué arma lleva cada uno, su munición y su cadencia (no se puede disparar sin arma,
 //    sin balas ni más rápido de lo que permite el arma);
 //  - armas del suelo: una recogida por arma (el primero que llega), el resto se rechaza;
-//  - movimiento: posiciones dentro del mundo y sin teletransportes (velocidad máxima creíble);
+//  - movimiento y COLISIONES: posiciones dentro del mundo, sin teletransportes (velocidad máxima) y
+//    nunca dentro ni a través de una pared; si no, se corrige al cliente ('player_correct');
+//  - MUERTES por el entorno (agua, vacío, pinchos): las detecta el servidor con el mapa de la ronda;
 //  - rondas, marcador y fin de partida (empates incluidos).
-// La física fina (saltos, colisiones con el mapa) corre en cada cliente para que el control sea
-// instantáneo; el servidor valida sus resultados y descarta lo imposible.
+// El cliente predice su propio movimiento para que el control sea instantáneo; el servidor
+// valida cada paquete contra el mapa y tiene la última palabra.
 const MAX_SPEED = 2400; // px/s: por encima de todo impulso legal (retroceso + explosión)
 const MOVE_SLACK = 80; // px de margen por paquete (jitter de red)
-const SPAWN_GRACE_MS = 900; // tras reaparecer se permite el salto de posición
+const SPAWN_RADIUS = 120; // al empezar la ronda, la primera posición tiene que estar junto a su aparición
 const MAX_REJECTS = 5; // tantos movimientos rechazados seguidos -> se resincroniza (y se anota)
 const COOLDOWN_TOLERANCE = 0.5; // fracción de la cadencia que se perdona por jitter de red
-const HIT_RANGE_SLACK = 150;
 const ROUND_START_EARLY_MS = 150; // el servidor abre la ronda un poco antes que los clientes
+const HISTORY_MS = 600; // posiciones recientes de cada jugador (el que dispara ve al rival con retraso)
+const BULLET_SLACK = 30; // px de margen alrededor de la trayectoria de una bala
+const BLAST_SLACK = 10; // px de margen en la distancia al centro de una explosión
+const DEAD_TIMEOUT_MS = 1500; // el cliente dice estar muerto y el servidor no lo vio: se da por muerto
 
 export default class GameRoom {
   constructor({ id, code = null, isPrivate = false, passwordHash = null, telemetry = null, send, broadcast, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -51,7 +60,7 @@ export default class GameRoom {
   addPlayer(id, name = 'Soldado') {
     if (this.full || this.player(id)) return null;
     const index = this.players.some((p) => p.index === 0) ? 1 : 0;
-    const p = { id, index, name, ready: false, hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], pos: null, rejects: 0, spawnAt: this.now() };
+    const p = { id, index, name, ready: false, hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], pos: null, history: [], deadSince: null, rejects: 0, fresh: true };
     this.players.push(p);
     return p;
   }
@@ -73,6 +82,11 @@ export default class GameRoom {
 
   lobbyState() {
     return { code: this.code, players: this.players.map((p) => ({ name: p.name, index: p.index, ready: p.ready })) };
+  }
+
+  // Mapa de la ronda actual (los clientes usan la misma rotación).
+  get map() {
+    return MAPS[mapForRound(this.round)];
   }
 
   // -------------------------------------------------------------- partida
@@ -101,30 +115,64 @@ export default class GameRoom {
     this.roundStartAt = this.now();
     this.items.clear();
     this.lastSpawnAt = -Infinity;
-    for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], spawnAt: this.now(), rejects: 0 });
+    for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], history: [], deadSince: null, fresh: true, rejects: 0 });
   }
 
   // --------------------------------------------------------- validaciones
-  // Movimiento [x, y, vx, vy, flags]: dentro del mundo y sin teletransporte. Devuelve true si se acepta.
+  // Movimiento [x, y, vx, vy, flags]. Devuelve 'ok', 'reject' (se descarta) o 'correct' (se descarta
+  // y el cliente debe volver a la última posición válida, que queda en p.pos).
   onMove(id, packed) {
     const p = this.player(id);
-    if (!p) return false;
+    if (!p) return 'reject';
     const [x, y, , , flags] = packed;
     const alive = !!(flags & 2);
     const now = this.now();
-    if (p.pos && alive && p.pos.alive && now - p.spawnAt > SPAWN_GRACE_MS) {
-      const dt = Math.max(16, now - p.pos.at) / 1000;
-      const dist = Math.hypot(x - p.pos.x, y - p.pos.y);
-      if (dist > MAX_SPEED * dt + MOVE_SLACK && ++p.rejects < MAX_REJECTS) {
-        this.violations++;
-        return false;
+    const playing = this.phase === 'playing' && p.alive;
+    if (playing && p.fresh) {
+      // Ronda nueva: hasta que el cliente reaparece en SU punto de aparición se descartan sus paquetes
+      // (aún de la ronda anterior: otro mapa o el cuerpo cayendo). Nada de teletransportes de salida.
+      const spawn = this.map.spawns[p.index];
+      if (!alive || Math.hypot(x - spawn.x, y - spawn.y) > SPAWN_RADIUS) return 'reject';
+      p.fresh = false;
+    } else if (playing && p.pos) {
+      // Paredes y velocidad solo con el cuerpo vivo (al morir atraviesa el mapa dando vueltas).
+      if (alive && p.pos.alive) {
+        const dt = Math.max(16, now - p.pos.at) / 1000;
+        const dist = Math.hypot(x - p.pos.x, y - p.pos.y);
+        if (dist > MAX_SPEED * dt + MOVE_SLACK && ++p.rejects < MAX_REJECTS) {
+          this.violations++;
+          return 'reject';
+        }
+        if (illegalMove(this.map, p.pos, x, y)) {
+          this.violations++;
+          return 'correct';
+        }
+      }
+      // Agua, vacío y pinchos: también en el paquete en que el cliente ya se ve muerto (justo lo tocó).
+      if (p.pos.alive) {
+        const cause = environmentDeath(this.map, p.pos, { x, y });
+        if (cause) this.kill(p, cause);
+      }
+      // Red de seguridad: el cliente dice que murió y el servidor no lo vio pasar.
+      if (p.alive && !alive) {
+        p.deadSince ??= now;
+        if (now - p.deadSince > DEAD_TIMEOUT_MS) this.kill(p, 'unknown');
       }
     }
-    if (alive && p.pos && !p.pos.alive) p.spawnAt = now; // reaparición: salto permitido
-    if (!alive && this.phase === 'playing') p.alive = false; // muerte por el entorno (la confirma round_end)
+    if (alive) p.deadSince = null;
     p.rejects = 0;
     p.pos = { x, y, alive, at: now };
-    return true;
+    p.history.push(p.pos);
+    while (p.history.length && now - p.history[0].at > HISTORY_MS) p.history.shift();
+    return 'ok';
+  }
+
+  kill(p, cause) {
+    if (!p.alive) return;
+    p.alive = false;
+    p.hp = 0;
+    p.deathCause = cause;
+    this.registerDeath(p.index);
   }
 
   // Arma que aparece: solo la propone el host, con tipo válido y sin repetir id.
@@ -157,7 +205,7 @@ export default class GameRoom {
     if (now < w.nextShotAt - def.cooldown * COOLDOWN_TOLERANCE) return false;
     w.ammo--;
     w.nextShotAt = now + def.cooldown;
-    p.shots.push({ w: d.w, at: now, hitsLeft: def.explosive ? 1 : d.a.length });
+    p.shots.push({ w: d.w, at: now, x: d.x, y: d.y, a: d.a, hitsLeft: def.explosive ? 1 : d.a.length });
     if (p.shots.length > 8) p.shots.shift();
     if (w.ammo <= 0) p.weapon = null;
     return true;
@@ -167,54 +215,73 @@ export default class GameRoom {
     const p = this.player(id);
     if (!p || !p.alive || !p.weapon || p.weapon.type !== d.w) return false;
     p.weapon = null;
-    p.throws.push({ at: this.now(), used: false });
+    p.throws.push({ at: this.now(), x: d.x, y: d.y, used: false });
     if (p.throws.length > 4) p.throws.shift();
     return true;
   }
 
-  // Impacto propuesto por el que disparó. Solo se acepta si cuadra con un disparo/lanzamiento reciente
-  // suyo, con el daño máximo del arma y a una distancia creíble. El servidor resta la vida.
-  // Devuelve { victim, hit } para avisar al herido, o null si se rechaza.
+  // Aviso de impacto del que disparó: { w, kx, ky, ex?, ey? } ("le di con el arma w"; ex/ey = centro de
+  // la explosión). El servidor busca un disparo reciente suyo que pudiera llegar al rival según SUS
+  // posiciones y su mapa, y calcula el daño. Devuelve { victim, hit } para avisar al herido, o null.
   onHit(id, d) {
     const shooter = this.player(id);
     const victim = this.opponentOf(id);
-    if (!shooter || !victim || this.phase !== 'playing' || !victim.alive || d.d <= 0) return this.reject();
-    if (d.d > maxHitDamage(d.w)) return this.reject();
+    if (!shooter || !victim || this.phase !== 'playing' || !victim.alive) return this.reject();
     const now = this.now();
+    // Dónde estuvo el rival hace poco (el que dispara lo ve con ~100-200 ms de retraso).
+    const seen = victim.history.length ? victim.history : victim.pos ? [victim.pos] : [];
+    if (!seen.length) return this.reject();
+    let damage;
     if (d.w === THROWN_WEAPON) {
       const t = shooter.throws.find((th) => !th.used && now - th.at <= THROW.lifeMs + 500);
-      if (!t) return this.reject();
+      if (!t || !seen.some((v) => Math.hypot(v.x - t.x, v.y - t.y) <= weaponRange(THROWN_WEAPON) + BULLET_SLACK)) return this.reject();
       t.used = true;
+      damage = THROW.damage;
     } else {
-      const life = WEAPONS[d.w].life * 1.3 + 500;
-      const shot = shooter.shots.find((s) => s.w === d.w && s.hitsLeft > 0 && now - s.at <= life);
-      if (!shot) return this.reject();
+      const def = WEAPONS[d.w];
+      if (!def) return this.reject();
+      const life = def.life * 1.3 + 500;
+      const range = weaponRange(d.w);
+      const recent = shooter.shots.filter((s) => s.w === d.w && s.hitsLeft > 0 && now - s.at <= life);
+      // ¿Llega el rayo desde la boca del arma hasta `along` px sin pared en medio?
+      const clear = (s, deg, along) => {
+        const rad = (deg * Math.PI) / 180;
+        const reach = Math.max(0, along - 12); // el impacto toca la pared: mirar un poco antes
+        return lineOfSight(this.map, s.x, s.y, s.x + Math.cos(rad) * reach, s.y + Math.sin(rad) * reach);
+      };
+      let shot;
+      if (def.explosive) {
+        // El cohete vuela en línea recta: la explosión tiene que estar en su trayectoria y sin
+        // paredes antes. El daño sale de la distancia del rival (según el servidor) a la explosión.
+        if (d.ex === undefined || d.ey === undefined) return this.reject();
+        shot = recent.find((s) => {
+          const { along, perp } = rayDistance(s.x, s.y, s.a[0], d.ex, d.ey);
+          return perp <= BULLET_SLACK && along >= -BULLET_SLACK && along <= range && clear(s, s.a[0], along);
+        });
+        if (!shot) return this.reject();
+        const dist = Math.min(...seen.map((v) => Math.hypot(v.x - d.ex, v.y - d.ey)));
+        if (dist > EXPLOSION.radius + BLAST_SLACK) return this.reject();
+        damage = explosionDamage(Math.max(0, dist - BLAST_SLACK));
+      } else {
+        // Bala: el rival tiene que haber estado cerca de la trayectoria de algún perdigón, dentro
+        // del alcance y sin paredes entre la boca del arma y él.
+        shot = recent.find((s) => s.a.some((deg) => seen.some((v) => {
+          const { along, perp } = rayDistance(s.x, s.y, deg, v.x, v.y);
+          return perp <= BULLET_SLACK && along >= -BULLET_SLACK && along <= range && clear(s, deg, along);
+        })));
+        if (!shot) return this.reject();
+        damage = def.damage;
+      }
       shot.hitsLeft--;
     }
-    if (shooter.pos && victim.pos && now - victim.pos.at < 1000) {
-      const dist = Math.hypot(shooter.pos.x - victim.pos.x, shooter.pos.y - victim.pos.y);
-      if (dist > weaponRange(d.w) + HIT_RANGE_SLACK) return this.reject();
-    }
-    victim.hp = Math.max(0, victim.hp - d.d);
-    if (victim.hp === 0) {
-      victim.alive = false;
-      this.registerDeath(victim.index);
-    }
-    return { victim, hit: d };
+    victim.hp = Math.max(0, victim.hp - damage);
+    if (victim.hp === 0) this.kill(victim, 'hit');
+    return { victim, hit: { d: damage, kx: d.kx, ky: d.ky, w: d.w } };
   }
 
   reject() {
     this.violations++;
     return null;
-  }
-
-  // Muerte que avisa el propio cliente (caída al agua/vacío, pinchos o golpe).
-  onDeathReport(id, d) {
-    const p = this.player(id);
-    if (!p || d.r !== this.round || d.loser !== p.index) return false;
-    p.alive = false;
-    this.registerDeath(p.index);
-    return true;
   }
 
   // Dos muertes dentro de DRAW_WINDOW_MS = empate.

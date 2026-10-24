@@ -6,9 +6,11 @@ import ArenaScene from './scenes/ArenaScene.js';
 import LobbyScene from './scenes/LobbyScene.js';
 import { socket, session } from './net.js';
 import { ChromaticFX } from './systems/Gfx.js';
+import { fixCanvasBlendModes } from './systems/CanvasTint.js'; // tintes y mezclas en Canvas 2D
 
 const game = new Phaser.Game({
-  type: Phaser.AUTO,
+  // Canvas 2D de HTML5 (lineamiento). Los shaders de Gfx.js solo se activan con WebGL: aquí quedan apagados.
+  type: Phaser.CANVAS,
   parent: 'game',
   width: CANVAS_WIDTH,
   height: CANVAS_HEIGHT,
@@ -24,6 +26,8 @@ const game = new Phaser.Game({
   pipeline: { ChromaticFX }, // shader propio de post-procesado (systems/Gfx.js)
   scene: [BootScene, TitleScene, LobbyScene, ArenaScene],
 });
+
+fixCanvasBlendModes(game);
 
 // Acceso desde la consola, solo en desarrollo.
 if (import.meta.env.DEV) Object.assign(window, { game, socket, session });

@@ -1,7 +1,7 @@
 import { GAME_WIDTH } from '../level.js';
 import { PLAYER_COLORS } from '../entities/Player.js';
 import { MAPS, mapForRound } from '../maps.js';
-import { socket, session, send } from '../net.js';
+import { socket, session } from '../net.js';
 import { play, setMusicIntensity } from '../audio.js';
 import {
   WINS_TO_MATCH, DRAW_WINDOW_MS, BANNER_MS, REPLAY_AT_MS, REPLAY_FROM_AGO_MS, REPLAY_TO_AGO_MS, REPLAY_SPEED,
@@ -13,9 +13,8 @@ const NAMES = ['AZUL', 'ROJO']; // si alguien no tiene nombre
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 
-// Rondas 1vs1. Online arbitra el SERVIDOR (server/game.js): cada cliente avisa de su muerte y
-// el servidor (que además lleva la vida de cada uno) emite el veredicto a los dos.
-//   cliente -> servidor:  round_end { r, loser }                  "he muerto en la ronda r"
+// Rondas 1vs1. Online arbitra el SERVIDOR (server/game.js): él lleva la vida de cada uno, detecta
+// las muertes (golpes, agua, vacío, pinchos) con su copia del mapa y emite el veredicto a los dos:
 //   servidor -> ambos:    round_end { r, winner, score, match }    veredicto (winner -1 = empate)
 // VS BOT (sin red) arbitra este mismo cliente con registerDeath().
 // Fases: 'solo' (sin rival, reaparición libre), 'playing', 'ended' (entre rondas).
@@ -105,8 +104,8 @@ export default class RoundManager {
     if (this.phase === 'solo') {
       this.nextTimer = this.scene.time.delayedCall(SOLO_RESPAWN_MS, () => this.scene.player.respawn());
     } else if (this.phase === 'playing') {
-      if (this.scene.mode === 'online') send('round_end', { r: this.round, loser: session.playerIndex });
-      else this.registerDeath(session.playerIndex);
+      // Online no se avisa nada: el servidor ve la muerte en nuestras posiciones y manda el veredicto.
+      if (this.scene.mode !== 'online') this.registerDeath(session.playerIndex);
     }
     // 'ended': ya hay veredicto; reaparecerá al empezar la siguiente ronda.
   }

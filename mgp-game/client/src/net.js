@@ -26,13 +26,24 @@ socket.on('player_info', (d) => {
 socket.on('connect', () => session.quick && socket.emit('quick_join', { name: session.name }));
 
 // --- Latencia: ping cada 2 s; el servidor responde pong con el mismo t ---
+// Con la pestaña en segundo plano el navegador retrasa timers y mensajes (cientos de ms): esas
+// medidas no son de la red, así que no se mide ni se informa nada hasta que vuelve a estar visible.
 const PING_EVERY_MS = 2000;
+const hidden = () => typeof document !== 'undefined' && document.hidden;
+let lastPingT = null;
+let reported = true; // la última medida ya se mandó al servidor
 setInterval(() => {
-  if (socket.connected) socket.emit('ping', { t: performance.now(), ...(session.latency !== null && { rtt: session.latency }) });
+  if (!socket.connected || hidden()) return;
+  lastPingT = performance.now();
+  socket.emit('ping', { t: lastPingT, ...(!reported && session.latency !== null && { rtt: session.latency }) });
+  reported = true;
 }, PING_EVERY_MS);
 socket.on('pong', (d) => {
-  if (typeof d?.t === 'number') session.latency = Math.round(performance.now() - d.t);
+  if (d?.t !== lastPingT || hidden()) return; // respuesta vieja o medida con la pestaña oculta
+  session.latency = Math.round(performance.now() - d.t);
+  reported = false;
 });
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => (lastPingT = null));
 
 // Envía un evento al rival solo si hay conexión y rival: sin conexión socket.io guardaría
 // los mensajes en un buffer y los soltaría todos de golpe al reconectar.

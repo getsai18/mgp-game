@@ -1,9 +1,9 @@
 # Arena Caos — duelo 1 vs 1 multijugador en tiempo real
 
-Videojuego web multijugador (HTML5 Canvas con Phaser 3) con servidor Node.js + WebSockets (socket.io)
+Videojuego web multijugador (**HTML5 Canvas 2D** con Phaser 3) con servidor Node.js + WebSockets (socket.io)
 y **autoridad del servidor** sobre la partida. Seis arenas, armas, bot con IA, controles de PC, mando y móvil.
 
-- **URL pública (HTTPS):** https://54-162-107-181.sslip.io
+- **URL pública (HTTPS, Render):** https://arena-caos.onrender.com
 - **Repositorio:** https://github.com/getsai18/mgp-game
 - **Código:** carpeta [`mgp-game/`](mgp-game/)
 
@@ -11,20 +11,20 @@ y **autoridad del servidor** sobre la partida. Seis arenas, armas, bot con IA, c
 
 | Módulo | Implementación | Dónde |
 |---|---|---|
-| **1. Red y Sockets** | WebSockets (socket.io, solo transporte `websocket`). El servidor es autoritativo: lleva la vida y calcula el daño, valida el inventario (arma, munición, cadencia), las armas del suelo (las recoge el primero que llega), el movimiento (límites del mundo y velocidad máxima) y decide rondas, marcador y fin de partida. Todos los mensajes se validan con esquemas **Zod** y tienen un límite de mensajes por segundo. Ping/pong cada 2 s con la latencia visible en pantalla. | `server/game.js`, `server/app.js`, `server/schemas.js` |
-| **2. Motor y Controles** | Bucle de Phaser con *delta time*: la velocidad es la misma a 60, 120 o 144 Hz, y la física corre a paso fijo de 60 Hz. Contador de FPS en pantalla. En pantallas táctiles aparece una cruceta (abajo a la izquierda) y los botones de acción (abajo a la derecha); en PC se ocultan y se usa teclado (`keydown`/`keyup`) o mando. | `client/src/scenes/ArenaScene.js`, `client/src/touch.js`, `client/src/systems/Controls.js` |
+| **1. Red y Sockets** | WebSockets (socket.io, solo transporte `websocket`). El servidor es autoritativo y tiene su propia copia del mapa (`server/arbiter.js`): **colisiones** (rechaza y corrige con `player_correct` cualquier posición dentro o a través de una pared, y teletransportes por velocidad), **muertes** por agua, vacío y pinchos (las detecta él, el cliente no las anuncia), **daño** (el cliente solo dice "le di con el arma w"; el servidor comprueba trayectoria, alcance y línea de visión contra las posiciones recientes del rival y calcula el daño, en las explosiones por distancia), inventario (arma, munición, cadencia), armas del suelo, apariciones (al empezar cada ronda solo se acepta al jugador en su punto) y rondas, marcador y fin de partida. Todos los mensajes se validan con esquemas **Zod** y tienen un límite por segundo. Ping/pong cada 2 s con la latencia en pantalla; la telemetría da media, mediana, p95 y % bajo 100 ms (sin medir con la pestaña en segundo plano). | `server/game.js`, `server/arbiter.js`, `server/app.js`, `server/schemas.js` |
+| **2. Motor y Controles** | Renderizado **Canvas 2D** (`Phaser.CANVAS`; tintes y mezclas en `systems/CanvasTint.js`). Bucle con *delta time*: la velocidad es la misma a 60, 120 o 144 Hz, y la física corre a paso fijo de 60 Hz. Contador de FPS en pantalla. En pantallas táctiles aparece una cruceta (abajo a la izquierda) y los botones de acción (abajo a la derecha); en PC se ocultan y se usa teclado (`keydown`/`keyup`) o mando. | `client/src/scenes/ArenaScene.js`, `client/src/touch.js`, `client/src/systems/Controls.js` |
 | **3. Endpoints de prueba** | `GET /api/test/telemetry`, `POST /api/test/seed`, `GET /api/test/health`, `GET /api/test/ping`, `GET /api/test/rooms`. Todos devuelven la cabecera `X-Response-Time`. | `server/app.js`, `server/telemetry.js` |
-| **4. Pruebas y CI/CD** | 26 pruebas Vitest (unitarias + integración) y 3 flujos E2E Playwright. Se ejecutan en GitHub Actions en cada push y Pull Request. | `mgp-game/tests/`, `.github/workflows/ci.yml` |
-| **5. Despliegue** | Producción en AWS EC2 con HTTPS (Caddy + certificado Let's Encrypt válido) y WebSockets seguros (`wss://`). También queda listo el Blueprint de Render (`render.yaml`) como alternativa. | `mgp-game/AWS.md`, `render.yaml` |
+| **4. Pruebas y CI/CD** | 34 pruebas Vitest (unitarias + integración) y 3 flujos E2E Playwright. Se ejecutan en GitHub Actions en cada push y Pull Request. | `mgp-game/tests/`, `.github/workflows/ci.yml` |
+| **5. Despliegue** | Producción en **Render** (Blueprint `render.yaml`, región Virginia, SSL automático y `wss://`), con despliegue automático en cada push a `main`. Un workflow hace ping a `/health` cada 10 min para que el plan gratuito no se duerma. | `render.yaml`, `.github/workflows/keepalive.yml` |
 
 ## Endpoints de prueba
 
 ```bash
-# Métricas agregadas: win rate (por lado y por jugador), KDR, supervivencia media, latencia, salas activas
-curl https://54-162-107-181.sslip.io/api/test/telemetry
+# Métricas agregadas: win rate (por lado y por jugador), KDR, supervivencia media, latencia (media, p50, p95), salas activas
+curl https://arena-caos.onrender.com/api/test/telemetry
 
 # Inyectar de 100 a 1000 partidas de prueba (reproducibles con "seed"; "reset" borra las anteriores)
-curl -X POST https://54-162-107-181.sslip.io/api/test/seed -H "Content-Type: application/json" -d '{"count": 1000, "seed": 42, "reset": true}'
+curl -X POST https://arena-caos.onrender.com/api/test/seed -H "Content-Type: application/json" -d '{"count": 1000, "seed": 42, "reset": true}'
 
 # También acepta partidas propias: {"matches": [{ "players": [{name,kills,deaths,won,survivalMs}, {...}], "rounds", "durationMs" }, ...]}
 ```
@@ -43,7 +43,7 @@ Controles: `A`/`D` mover · `W` saltar · `S` apuntar abajo / atravesar platafor
 cd mgp-game
 npm ci
 npm run dev          # servidor (:3000) + cliente Vite (:5173)
-npm test             # Vitest: 26 pruebas unitarias / integración
+npm test             # Vitest: 34 pruebas unitarias / integración
 npm run test:e2e     # build + Playwright: 3 flujos E2E (requiere: npx playwright install chromium)
 npm run build && npm start   # producción en :3000
 ```
@@ -55,7 +55,8 @@ npm run build && npm start   # producción en :3000
   - fórmulas de daño y escalado de explosiones;
   - esquemas Zod de payload;
   - interpolación de posiciones;
-  - autoridad del servidor (cadencia, munición, impactos, rondas);
+  - autoridad del servidor (cadencia, munición, daño calculado por el servidor, línea de visión,
+    paredes, muertes por agua / pinchos, aparición, rondas);
   - telemetría y API REST;
   - salas protegidas por WebSocket.
 - **E2E (Playwright):**

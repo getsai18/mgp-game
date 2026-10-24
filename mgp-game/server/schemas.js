@@ -35,16 +35,15 @@ export const throwSchema = z.object({
   vy: num(-2000, 2000),
 });
 
-// Aviso de impacto del que disparó (el servidor decide si se lo cree).
+// Aviso de impacto del que disparó: "le di con el arma w" (y dónde explotó, si es un cohete).
+// El daño lo calcula el servidor; no se acepta un número de daño del cliente.
 export const hitSchema = z.object({
-  d: int(0, 2),
   kx: num(-800, 800),
   ky: num(-800, 800),
   w: int(1, 8),
-});
-
-// Aviso de muerte propia (caída, pinchos o golpe).
-export const deathSchema = z.object({ r: int(1, 10000), loser: int(0, 1) });
+  ex: num(-200, 1640).optional(),
+  ey: num(-3000, 3000).optional(),
+}).strict();
 
 export const infoSchema = z.object({ name: z.string().trim().min(1).max(12) });
 export const tauntSchema = z.object({ i: int(0, 31) });

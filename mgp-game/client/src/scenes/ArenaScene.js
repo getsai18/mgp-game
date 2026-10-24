@@ -379,8 +379,12 @@ export default class ArenaScene extends Phaser.Scene {
     const handlers = {
       match_start: () => this.ensureRemote(),
       opponent_left: () => this.removeRemote(),
-      // El rival nos confirma un impacto (él es la autoridad sobre sus balas).
+      // Impacto sobre nosotros validado y calculado por el servidor.
       player_hit: (d) => this.receiveHit(d),
+      // El servidor rechazó nuestra posición (dentro o a través de una pared): volver a la última válida.
+      player_correct: (d) => {
+        if (this.player.alive && Number.isFinite(d?.x) && Number.isFinite(d?.y)) this.player.body.reset(d.x, d.y);
+      },
       player_move: (packed) => {
         if (!Array.isArray(packed) || packed.length !== 5) return;
         this.ensureRemote().pushState(packed);
@@ -432,8 +436,11 @@ export default class ArenaScene extends Phaser.Scene {
 
   sendState(time) {
     // Tolerancia de medio frame: a 60 FPS el frame llega a 49.9 ms y si no lo aceptamos caemos a 15 Hz.
-    if (!session.opponent || time - this.lastSentAt < SEND_INTERVAL_MS - 8) return;
+    if (!session.opponent) return;
     const state = packState(this.player, this.weapons.local?.type ?? 0, this.weapons.localAimDown);
+    // Al morir se manda ya: el servidor ve la muerte (agua, vacío, pinchos) en esa misma posición.
+    const died = this.lastSent && (this.lastSent[4] & 2) && !(state[4] & 2);
+    if (!died && time - this.lastSentAt < SEND_INTERVAL_MS - 8) return;
     const unchanged = this.lastSent && state.every((v, i) => v === this.lastSent[i]);
     if (unchanged && time - this.lastSentAt < IDLE_RESEND_MS) return;
     socket.volatile.emit('player_move', state);

@@ -37,7 +37,7 @@ export default class WeaponSystem {
     this.bullets = scene.physics.add.group({ allowGravity: false });
     scene.physics.add.overlap(this.bullets, platforms, (b) => this.bulletHitWall(b));
     // Balas del rival que nos alcanzan en NUESTRA pantalla: solo efecto visual.
-    // El daño real llega por 'player_hit' desde quien disparó (él tiene la autoridad).
+    // El daño real llega por 'player_hit' del servidor (lo calcula él).
     scene.physics.add.overlap(this.bullets, player, (a, b) => this.bulletHitLocal(a.def ? a : b));
 
     // Armas lanzadas: rebotan en las plataformas y golpean mientras van rápido.
@@ -110,6 +110,10 @@ export default class WeaponSystem {
       weapon_pickup: (d) => this.onRemotePickup(d),
       player_shoot: (d) => this.onRemoteShoot(d),
       weapon_throw: (d) => this.onRemoteThrow(d),
+      // El servidor no aceptó la aparición (host): quitarla para no recoger un arma que no existe.
+      weapon_spawn_denied: (d) => {
+        if (typeof d?.id === 'string') this.removeItem(d.id);
+      },
       // El servidor no nos dio el arma (el rival llegó antes): soltarla.
       weapon_denied: (d) => {
         if (d && this.local?.id === d.id) this.discardLocal();
@@ -427,7 +431,9 @@ export default class WeaponSystem {
     b.destroy();
   }
 
-  sendHit(d, kx, ky, w) {
+  // `d` es el daño que esperamos (sonido y modo bot); online el servidor calcula el de verdad y solo
+  // recibe "le di con el arma w" (+ el centro de la explosión `blast`, si es un cohete).
+  sendHit(d, kx, ky, w, blast = null) {
     if (!this.canDealDamage()) return;
     this.onDealtHit?.(w);
     this.scene.stats?.hit('me');
@@ -439,7 +445,7 @@ export default class WeaponSystem {
       playVoice('hurt', r.x, r.skin ? 1.22 : 1);
     }
     if (this.remoteIsBot) this.scene.botTakeHit(hit);
-    else send('player_hit', hit);
+    else send('player_hit', { kx: hit.kx, ky: hit.ky, w, ...(blast && { ex: Math.round(blast.x), ey: Math.round(blast.y) }) });
   }
 
   explode(x, y, owner) {
@@ -459,7 +465,7 @@ export default class WeaponSystem {
       const rd = Phaser.Math.Distance.Between(r.x, r.y, x, y);
       if (rd <= EXPLOSION.radius) {
         if (this.remoteIsBot) r.applyImpulse(...this.blastImpulse(r, x, y, rd)); // el bot tiene física propia
-        this.sendHit(explosionDamage(rd), 0, 0, 3);
+        this.sendHit(explosionDamage(rd), 0, 0, 3, { x, y });
       }
     }
     // Cohete del bot: daña al jugador local aquí mismo.

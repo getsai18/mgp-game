@@ -1,6 +1,7 @@
 // Telemetría de partidas en memoria: cada partida terminada (o sembrada por /api/test/seed) suma a
 // unos acumulados, así GET /api/test/telemetry responde en O(jugadores) sin recorrer las partidas.
 const MAX_MATCHES = 20000; // tope de memoria: se descartan las más antiguas (los acumulados se quedan)
+const LATENCY_WINDOW = 1000; // últimas medidas de ping/pong para la mediana y el p95
 const NAMES = ['NEO', 'TRINITY', 'GLITCH', 'CIPHER', 'NOVA', 'BYTE', 'VOLT', 'ROGUE', 'PIXEL', 'ZERO', 'ECHO', 'RAZOR', 'SPARK', 'DRIFT', 'HEX', 'ORBIT', 'BLAZE', 'FROST', 'VIPER', 'ATLAS'];
 
 export default class Telemetry {
@@ -12,7 +13,7 @@ export default class Telemetry {
     this.matches = [];
     this.totals = { matches: 0, rounds: 0, durationMs: 0, kills: 0, deaths: 0, survivalMs: 0, survivalSamples: 0, sideWins: [0, 0] };
     this.byName = new Map(); // nombre -> { matches, wins, kills, deaths }
-    this.latency = { sum: 0, samples: 0, max: 0 };
+    this.latency = { sum: 0, samples: 0, max: 0, recent: [] };
   }
 
   // match: { players: [{ name, kills, deaths, won, survivalMs }, x2], rounds, durationMs, at? }
@@ -44,6 +45,23 @@ export default class Telemetry {
     l.sum += ms;
     l.samples++;
     l.max = Math.max(l.max, ms);
+    l.recent.push(ms);
+    if (l.recent.length > LATENCY_WINDOW) l.recent.shift();
+  }
+
+  // Ping/pong: media y máximo históricos; mediana, p95 y % bajo 100 ms de las últimas medidas.
+  latencySummary() {
+    const l = this.latency;
+    const sorted = [...l.recent].sort((a, b) => a - b);
+    const pct = (q) => (sorted.length ? Math.round(sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]) : 0);
+    return {
+      avgMs: Math.round(l.samples ? l.sum / l.samples : 0),
+      p50Ms: pct(0.5),
+      p95Ms: pct(0.95),
+      maxMs: Math.round(l.max),
+      under100msPct: sorted.length ? +((sorted.filter((ms) => ms < 100).length / sorted.length) * 100).toFixed(1) : 0,
+      samples: l.samples,
+    };
   }
 
   // Métricas agregadas: tasa de victoria (por lado y por jugador), KDR y supervivencia media por ronda.
@@ -65,7 +83,7 @@ export default class Telemetry {
       avgMatchDurationMs: Math.round(t.matches ? t.durationMs / t.matches : 0),
       avgRoundsPerMatch: ratio(t.rounds, t.matches),
       topPlayers: top,
-      latency: { avgMs: Math.round(this.latency.samples ? this.latency.sum / this.latency.samples : 0), maxMs: Math.round(this.latency.max), samples: this.latency.samples },
+      latency: this.latencySummary(),
       live,
       computedInMs: +(performance.now() - t0).toFixed(3),
     };

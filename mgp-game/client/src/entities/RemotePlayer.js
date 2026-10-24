@@ -5,7 +5,7 @@ import Cosmetics from '../systems/Cosmetics.js';
 
 export { packState } from '../netState.js'; // (la escena lo importa de aquí)
 
-const INTERP_DELAY_MS = 100; // 2 paquetes a 20 Hz: absorbe jitter de red
+const INTERP_DELAY_MS = 70; // 2 paquetes a 30 Hz: absorbe jitter de red
 const DEATH_SPIN = 900; // grados/s mientras está muerto
 
 // Rival controlado por red: sin física propia, solo interpola lo que recibe.

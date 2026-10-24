@@ -8,6 +8,7 @@ import path from 'node:path';
 import { Server } from 'socket.io';
 import GameRoom from './game.js';
 import Telemetry from './telemetry.js';
+import { prefetchMatchMaps } from './mapPool.js';
 import {
   parse, moveSchema, shootSchema, spawnSchema, pickupSchema, throwSchema, hitSchema,
   infoSchema, tauntSchema, pingSchema, roomSchema, readySchema, seedSchema,
@@ -100,6 +101,7 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
     const room = new GameRoom({
       id,
       telemetry,
+      prefetchMaps: prefetchMatchMaps,
       ...opts,
       send: (socketId, evt, data) => io.to(socketId).emit(evt, data),
       broadcast: (evt, data) => io.to(id).emit(evt, data),

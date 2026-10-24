@@ -26,7 +26,7 @@ import { isTouch, showTouchControls, hideTouchControls, setSoundIcon, toggleFull
 const PLACES = { water: 'AL AGUA', void: 'AL VACÍO', spikes: 'A LOS PINCHOS', hit: '' };
 // Tono de voz de cada personaje (el jugador 2 algo más agudo) para los quejidos.
 const voicePitch = (p) => (p?.skin ? 1.22 : 1);
-const SEND_INTERVAL_MS = 50; // 20 Hz
+const SEND_INTERVAL_MS = 33; // 30 Hz (paquetes de ~25 bytes: el rival se ve más al día)
 const IDLE_RESEND_MS = 250; // si nada cambia, reenviar solo cada 250 ms
 
 export default class ArenaScene extends Phaser.Scene {
@@ -303,9 +303,10 @@ export default class ArenaScene extends Phaser.Scene {
     this.mapLayer?.destroy();
     // Fondo en dos capas: la lejana se mueve menos que la cámara (paralaje) y da profundidad.
     const bg = drawMapBackground(this, map);
-    this.mapFar = bake(this, bg.far, map.width, map.height).setDepth(-11).setScrollFactor(0.55);
-    this.mapBg = bake(this, bg.near, map.width, map.height).setDepth(-10);
-    this.mapLayer = bake(this, drawMapTiles(this, map), map.width, map.height).setDepth(0);
+    const ambient = map.theme.ambientLight ?? 0xffffff; // luz ambiente horneada (ver Lights.js)
+    this.mapFar = bake(this, bg.far, map.width, map.height, ambient).setDepth(-11).setScrollFactor(0.55);
+    this.mapBg = bake(this, bg.near, map.width, map.height, ambient).setDepth(-10);
+    this.mapLayer = bake(this, drawMapTiles(this, map), map.width, map.height, ambient).setDepth(0);
 
     for (const obj of this.mapObjects) obj.destroy();
     this.mapObjects = this.glow.setMap(map);
@@ -438,7 +439,7 @@ export default class ArenaScene extends Phaser.Scene {
   }
 
   sendState(time) {
-    // Tolerancia de medio frame: a 60 FPS el frame llega a 49.9 ms y si no lo aceptamos caemos a 15 Hz.
+    // Tolerancia de medio frame: a 60 FPS el 2.º frame llega a 33.2 ms y si no lo aceptamos caemos a 20 Hz.
     if (!session.opponent) return;
     const state = packState(this.player, this.weapons.local?.type ?? 0, this.weapons.localAimDown);
     // Al morir se manda ya: el servidor ve la muerte (agua, vacío, pinchos) en esa misma posición.

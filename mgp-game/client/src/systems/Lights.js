@@ -3,10 +3,10 @@ import { TILE } from '../level.js';
 import { isHighQuality, onQualityChange } from './Gfx.js';
 
 // Iluminación barata (sin Light2D ni mapas de normales):
-//  - una capa de "oscuridad" que multiplica el mundo por el color ambiente del mapa;
+//  - el color ambiente del mapa (theme.ambientLight) ya va multiplicado en las texturas del mapa al
+//    hornearlas (Juice.bake): los jugadores y efectos quedan a todo color y destacan sobre el fondo;
 //  - luces aditivas encima: antorchas que parpadean, fogonazos, explosiones y cohetes.
-// Todo local y cosmético. Con calidad baja no se dibuja nada.
-const DEPTH_DARK = 8.5; // por encima de mapa, jugadores y armas; por debajo de partículas de ambiente
+// Todo local y cosmético. Con calidad baja no se dibujan las luces.
 const DEPTH_LIGHT = 8.6;
 const LIGHT_TEX_R = 64; // radio de la textura 'light' (BootScene)
 
@@ -37,7 +37,6 @@ const LAMPS = {
 export default class Lights {
   constructor(scene) {
     this.scene = scene;
-    this.dark = null;
     this.torches = []; // { img, base }
     this.boost = 1; // intensidad de las luces en el mapa actual (en mapas claros se nota menos)
     this.enabled = isHighQuality();
@@ -56,13 +55,7 @@ export default class Lights {
   setMap(map) {
     const s = this.scene;
     const objects = [];
-    const ambient = map.theme.ambientLight ?? 0xffffff;
     this.boost = map.theme.lightBoost ?? 1;
-    // Margen alrededor del mapa: con la sacudida de cámara no debe asomar el borde de la capa.
-    // Imagen (no rectángulo): en Canvas 2D las formas ignoran el MULTIPLY y taparían el mapa.
-    this.dark = s.add.image(map.width / 2, map.height / 2, 'pixel').setDisplaySize(map.width + 400, map.height + 400).setTint(ambient)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(DEPTH_DARK).setVisible(this.enabled);
-    objects.push(this.dark);
 
     // Cada tema ilumina sus lámparas ('i') a su manera (ver LAMPS).
     const lamp = LAMPS[map.theme.lamp ?? 'torch'];
@@ -79,7 +72,6 @@ export default class Lights {
 
   setEnabled(on) {
     this.enabled = on;
-    this.dark?.active && this.dark.setVisible(on);
     for (const t of this.torches) if (t.img.active) t.img.setVisible(on);
   }
 

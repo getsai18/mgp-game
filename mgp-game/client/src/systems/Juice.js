@@ -6,9 +6,11 @@ const MAX_CASINGS = 40;
 const TRAIL_MIN_SPEED = 380;
 const TRAIL_EVERY_MS = 35;
 
-// Phaser (WebGL) re-tesela un Graphics en cada frame: lo estático se dibuja una vez en un RenderTexture.
+// Un Graphics se vuelve a dibujar entero en cada frame: lo estático se dibuja una vez en un RenderTexture.
 // Tamaño por defecto: la interfaz (960x540); los mapas pasan el suyo.
-export function bake(scene, graphics, width = GAME_WIDTH, height = GAME_HEIGHT) {
+// `ambient`: color con el que se multiplica el resultado (la luz ambiente del mapa, systems/Lights.js).
+// Se aplica una sola vez aquí: una capa MULTIPLY a pantalla completa cada frame era lo más caro del Canvas.
+export function bake(scene, graphics, width = GAME_WIDTH, height = GAME_HEIGHT, ambient = 0xffffff) {
   const rt = scene.add.renderTexture(0, 0, width, height).setOrigin(0);
   rt.draw(graphics);
   // Textos horneados (letreros de los mapas): se dibujan encima y se descartan.
@@ -17,7 +19,26 @@ export function bake(scene, graphics, width = GAME_WIDTH, height = GAME_HEIGHT) 
     t.destroy();
   }
   graphics.destroy();
+  if (ambient !== 0xffffff) multiply(rt, ambient);
   return rt;
+}
+
+// Multiplica los píxeles del RenderTexture por `color` conservando su transparencia (solo Canvas 2D).
+function multiply(rt, color) {
+  const { canvas, context: ctx } = rt.texture;
+  if (!ctx) return;
+  const alpha = document.createElement('canvas');
+  alpha.width = canvas.width;
+  alpha.height = canvas.height;
+  alpha.getContext('2d').drawImage(canvas, 0, 0);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(alpha, 0, 0);
+  ctx.restore();
 }
 
 // Efectos de "juice": hit-stop, cámara lenta, kill-cam, casquillos, ondas expansivas, estelas.

@@ -1,6 +1,7 @@
 import { GAME_WIDTH } from '../level.js';
 import { PLAYER_COLORS } from '../entities/Player.js';
 import { roundMap } from '../mapGen.js';
+import { prefetchMatchMaps } from '../mapPrefetch.js';
 import { socket, session } from '../net.js';
 import { play, setMusicIntensity } from '../audio.js';
 import {
@@ -76,6 +77,7 @@ export default class RoundManager {
     this.score = [0, 0];
     this.round = 1;
     this.matchNo = 0;
+    prefetchMatchMaps(session.mapSeed, 0); // mapas procedurales de la partida, en otro hilo
     this.startRound();
   }
 
@@ -166,6 +168,7 @@ export default class RoundManager {
       if (match >= 0) {
         this.score = [0, 0];
         this.matchNo++;
+        prefetchMatchMaps(session.mapSeed, this.matchNo);
       }
       this.round = match >= 0 ? 1 : r + 1;
       this.startRound();

@@ -28,8 +28,9 @@ const BLAST_SLACK = 10; // px de margen en la distancia al centro de una explosi
 const DEAD_TIMEOUT_MS = 1500; // el cliente dice estar muerto y el servidor no lo vio: se da por muerto
 
 export default class GameRoom {
-  constructor({ id, code = null, isPrivate = false, passwordHash = null, telemetry = null, send, broadcast, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
-    Object.assign(this, { id, code, isPrivate, passwordHash, telemetry, send, broadcast, now, setTimer, clearTimer });
+  constructor({ id, code = null, isPrivate = false, passwordHash = null, telemetry = null, send, broadcast, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, prefetchMaps = null }) {
+    // prefetchMaps(seed, matchNo): calcula en otro hilo los mapas procedurales de la partida (mapPool.js).
+    Object.assign(this, { id, code, isPrivate, passwordHash, telemetry, send, broadcast, now, setTimer, clearTimer, prefetchMaps });
     this.players = []; // [{ id, index, name, ready, ... }] (el primero es el host)
     this.phase = 'waiting'; // 'waiting' | 'playing' | 'ended'
     this.round = 1;
@@ -102,6 +103,7 @@ export default class GameRoom {
     this.score = [0, 0];
     this.round = 1;
     this.matchStartAt = this.now();
+    this.prefetchMaps?.(this.mapSeed, this.matchNo);
     this.stats = [0, 1].map(() => ({ kills: 0, deaths: 0, survivalMs: 0 })); // por índice de jugador
     this.rounds = 0;
     this.startRound();
@@ -123,7 +125,7 @@ export default class GameRoom {
     this.roundStartAt = this.now();
     this.items.clear();
     this.lastSpawnAt = -Infinity;
-    void this.map; // genera (o saca de la caché) el mapa de la ronda ya, no en el primer paquete
+    void this.map; // normalmente ya está en la caché (mapPool); si no, se genera aquí
     for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], history: [], deadSince: null, fresh: true, rejects: 0 });
   }
 

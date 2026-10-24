@@ -174,27 +174,68 @@ function playable(map) {
   return reach.has(b) && map.weaponSpawns.every((w) => reach.has(seg(w, 8)));
 }
 
-const cache = new Map(); // "semilla:tema" -> mapa (pocos: se descartan los más antiguos)
-const CACHE_MAX = 24;
+const cache = new Map(); // "semilla:tema" -> mapa (los más antiguos se descartan)
+const CACHE_MAX = 64;
+const keyOf = (seed, themeIndex) => `${seed >>> 0}:${themeIndex}`;
 
-// Mapa generado con la semilla `seed` y el estilo del mapa a mano MAPS[themeIndex].
-export function generateMap(seed, themeIndex = 0) {
-  const key = `${seed >>> 0}:${themeIndex}`;
-  if (cache.has(key)) return cache.get(key);
+function styleOf(themeIndex) {
   const base = MAPS[themeIndex % MAPS.length];
   const theme = Object.fromEntries(Object.entries(base.theme).filter(([k]) => !LAYOUT_ONLY.includes(k)));
   const decor = [...new Set(base.rows.join(''))].filter((ch) => FREE_DECOR.includes(ch));
-  let map = null;
-  for (let attempt = 0; attempt < MAX_TRIES && !map; attempt++) {
-    const half = layout(rng(mixSeed(seed, attempt)), theme, decor);
-    if (!half) continue;
-    const candidate = parse({ name: `${base.name} #${(seed % 9000) + 1000}`, theme, rows: mirror(half) });
-    if (playable(candidate)) map = Object.assign(candidate, { themeIndex: base.themeIndex, generated: true, seed: seed >>> 0 });
-  }
-  map ??= base; // (no ha pasado nunca en las pruebas: 80 intentos fallidos seguidos)
+  return { base, theme, decor };
+}
+
+function build(seed, themeIndex, rows) {
+  const { base, theme } = styleOf(themeIndex);
+  if (!rows) return base; // (no ha pasado nunca en las pruebas: 80 intentos fallidos seguidos)
+  const map = parse({ name: `${base.name} #${(seed % 9000) + 1000}`, theme, rows });
+  return Object.assign(map, { themeIndex: base.themeIndex, generated: true, seed: seed >>> 0 });
+}
+
+function store(key, map) {
   cache.set(key, map);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return map;
+}
+
+// La parte cara (generar y validar con el grafo del bot, decenas de ms): devuelve el ASCII del primer
+// candidato jugable, o null. Es lo que corre en los hilos aparte (mapWorker.js / server/mapPool.js).
+export function generateRows(seed, themeIndex = 0) {
+  const { theme, decor } = styleOf(themeIndex);
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    const half = layout(rng(mixSeed(seed, attempt)), theme, decor);
+    if (!half) continue;
+    const rows = mirror(half);
+    if (playable(parse({ name: '', theme, rows }))) return rows;
+  }
+  return null;
+}
+
+// Mapa generado con la semilla `seed` y el estilo del mapa a mano MAPS[themeIndex]. Si ya lo calculó
+// un hilo aparte sale de la caché al instante; si no, se genera aquí (bloquea).
+export function generateMap(seed, themeIndex = 0) {
+  const key = keyOf(seed, themeIndex);
+  return cache.get(key) ?? store(key, build(seed, themeIndex, generateRows(seed, themeIndex)));
+}
+
+// Resultado de un hilo aparte: solo queda convertir el ASCII (parse, ~1 ms).
+export function adoptRows(seed, themeIndex, rows) {
+  const key = keyOf(seed, themeIndex);
+  if (!cache.has(key)) store(key, build(seed, themeIndex, rows));
+}
+
+export const isReady = (seed, themeIndex) => cache.has(keyOf(seed, themeIndex));
+
+// Semilla y estilo del mapa generado de la ronda `round` (solo rondas pares).
+function procedural(round, seed, matchNo) {
+  return { seed: mixSeed(seed, matchNo, round), themeIndex: ((round >> 1) + 2) % MAPS.length };
+}
+
+// Mapas procedurales de una partida (rondas pares hasta la 12: a 5 victorias son 9 rondas sin empates),
+// para calcularlos por adelantado en otro hilo al empezar la partida.
+export function matchJobs(seed, matchNo = 0) {
+  if (seed === null || seed === undefined) return [];
+  return [2, 4, 6, 8, 10, 12].map((r) => procedural(r, seed, matchNo)).filter((j) => !isReady(j.seed, j.themeIndex));
 }
 
 // Mapa de cada ronda: impares, los hechos a mano en orden; pares, uno generado con la semilla de la
@@ -203,7 +244,8 @@ export function generateMap(seed, themeIndex = 0) {
 export function roundMap(round, seed = null, matchNo = 0) {
   const hand = MAPS[((round - 1) >> 1) % MAPS.length];
   if (round % 2 === 1 || seed === null || seed === undefined) return hand;
-  return generateMap(mixSeed(seed, matchNo, round), ((round >> 1) + 2) % MAPS.length);
+  const job = procedural(round, seed, matchNo);
+  return generateMap(job.seed, job.themeIndex);
 }
 
 export const randomSeed = () => Math.floor(Math.random() * 2 ** 32);

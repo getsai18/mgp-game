@@ -618,6 +618,7 @@ const SETPIECE = {
   // Letrero de la entrada sobre la viga del arco.
   utez({ g, scene, map }) {
     const beam = map.theme.sign; // { r, c0, c1 }
+    if (!beam) return; // (los mapas generados con este estilo no llevan letrero)
     const x0 = beam.c0 * TILE + 10;
     const x1 = (beam.c1 + 1) * TILE - 10;
     const y = beam.r * TILE + 9;

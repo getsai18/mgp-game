@@ -1,6 +1,6 @@
 import { GAME_WIDTH } from '../level.js';
 import { PLAYER_COLORS } from '../entities/Player.js';
-import { MAPS, mapForRound } from '../maps.js';
+import { roundMap } from '../mapGen.js';
 import { socket, session } from '../net.js';
 import { play, setMusicIntensity } from '../audio.js';
 import {
@@ -23,6 +23,7 @@ export default class RoundManager {
     this.scene = scene;
     this.phase = session.opponent ? 'playing' : 'solo';
     this.round = 1;
+    this.matchNo = 0; // revanchas en la misma sala (cambian los mapas generados; ver mapGen.roundMap)
     this.score = [0, 0];
     this.deaths = new Set();
     this.decideTimer = null;
@@ -74,6 +75,7 @@ export default class RoundManager {
     this.scene.stats?.reset();
     this.score = [0, 0];
     this.round = 1;
+    this.matchNo = 0;
     this.startRound();
   }
 
@@ -92,11 +94,12 @@ export default class RoundManager {
     this.phase = 'playing';
     this.deaths.clear();
     this.decideTimer = null;
-    const mapIndex = mapForRound(this.round);
-    this.scene.resetRound(mapIndex);
+    // Mismo mapa que el rival y el servidor: ronda + semilla de la partida + número de revancha.
+    const map = roundMap(this.round, session.mapSeed, this.matchNo);
+    this.scene.resetRound(map);
     setMusicIntensity(this.score.some((n) => n === WINS_TO_MATCH - 1)); // punto de partido: más caña
     this.renderScore();
-    this.showBanner(`RONDA ${this.round}\n${MAPS[mapIndex].name}`, '#ffffff', 1000);
+    this.showBanner(`RONDA ${this.round}\n${map.name}${map.generated ? '\nPROCEDURAL' : ''}`, '#ffffff', 1000);
     play('round');
   }
 
@@ -160,7 +163,10 @@ export default class RoundManager {
     this.nextTimer = this.scene.time.delayedCall(match >= 0 ? NEXT_MATCH_MS : NEXT_ROUND_MS, () => {
       // Partida nueva: marcador a cero. El número de ronda solo vuelve a 1 en ambos a la vez,
       // porque los dos aplican el mismo veredicto.
-      if (match >= 0) this.score = [0, 0];
+      if (match >= 0) {
+        this.score = [0, 0];
+        this.matchNo++;
+      }
       this.round = match >= 0 ? 1 : r + 1;
       this.startRound();
     });

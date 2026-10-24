@@ -1,6 +1,6 @@
 import { WEAPONS, MAX_HP, THROWN_WEAPON, THROW, EXPLOSION, weaponRange, explosionDamage } from '../client/src/weapons.js';
 import { WINS_TO_MATCH, DRAW_WINDOW_MS, NEXT_ROUND_MS, NEXT_MATCH_MS } from '../client/src/rules.js';
-import { MAPS, mapForRound } from '../client/src/maps.js';
+import { roundMap, randomSeed } from '../client/src/mapGen.js';
 import { illegalMove, environmentDeath, lineOfSight, rayDistance } from './arbiter.js';
 
 // Sala de juego con AUTORIDAD DEL SERVIDOR sobre lo que decide la partida:
@@ -38,6 +38,13 @@ export default class GameRoom {
     this.lastSpawnAt = -Infinity;
     this.timers = new Set();
     this.violations = 0; // intentos rechazados (telemetría / depuración)
+    this.newMapSeed();
+  }
+
+  // Semilla de los mapas procedurales (va en 'match_start'); matchNo cuenta las revanchas.
+  newMapSeed() {
+    this.mapSeed = randomSeed();
+    this.matchNo = 0;
   }
 
   // ------------------------------------------------------------ jugadores
@@ -84,9 +91,9 @@ export default class GameRoom {
     return { code: this.code, players: this.players.map((p) => ({ name: p.name, index: p.index, ready: p.ready })) };
   }
 
-  // Mapa de la ronda actual (los clientes usan la misma rotación).
+  // Mapa de la ronda actual: el mismo que calculan los clientes (client/src/mapGen.js).
   get map() {
-    return MAPS[mapForRound(this.round)];
+    return roundMap(this.round, this.mapSeed, this.matchNo);
   }
 
   // -------------------------------------------------------------- partida
@@ -102,6 +109,7 @@ export default class GameRoom {
 
   stopMatch() {
     this.clearTimers();
+    this.newMapSeed(); // rival nuevo, mapas nuevos
     this.phase = 'waiting';
     this.score = [0, 0];
     this.round = 1;
@@ -115,6 +123,7 @@ export default class GameRoom {
     this.roundStartAt = this.now();
     this.items.clear();
     this.lastSpawnAt = -Infinity;
+    void this.map; // genera (o saca de la caché) el mapa de la ronda ya, no en el primer paquete
     for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], history: [], deadSince: null, fresh: true, rejects: 0 });
   }
 
@@ -314,6 +323,7 @@ export default class GameRoom {
     if (match >= 0) this.recordMatch(match);
     this.timer((match >= 0 ? NEXT_MATCH_MS : NEXT_ROUND_MS) - ROUND_START_EARLY_MS, () => {
       if (match >= 0) {
+        this.matchNo++;
         this.startMatch();
       } else {
         this.round++;

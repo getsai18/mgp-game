@@ -71,7 +71,7 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
   app.get('/api/test/ping', (_req, res) => res.json({ pong: true, serverTime: Date.now() }));
   app.get('/api/test/telemetry', (_req, res) => res.json(telemetry.summary(live())));
   app.get('/api/test/rooms', (_req, res) => res.json([...rooms.values()].map((r) => ({
-    id: r.id, private: r.isPrivate, code: r.isPrivate ? r.code : null, phase: r.phase, round: r.round, score: r.score, players: r.players.length,
+    id: r.id, private: r.isPrivate, code: r.isPrivate ? r.code : null, phase: r.phase, round: r.round, map: r.map.name, score: r.score, players: r.players.length,
   }))));
   app.post('/api/test/seed', (req, res) => {
     const body = seedSchema.safeParse(req.body);
@@ -130,7 +130,7 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
 
   function startMatch(room) {
     room.startMatch();
-    io.to(room.id).emit('match_start');
+    io.to(room.id).emit('match_start', { seed: room.mapSeed });
   }
 
   function leave(socket) {

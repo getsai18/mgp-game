@@ -11,11 +11,13 @@ export const socket = io({ transports: ['websocket'], autoConnect: false });
 export const session = {
   roomId: null, playerIndex: 0, isHost: true, opponent: false, name: 'Soldado', opponentName: null,
   code: null, private: false, quick: false, latency: null,
+  mapSeed: null, // semilla de los mapas procedurales de la partida (la manda el servidor)
 };
 
 socket.on('joined', (d) => Object.assign(session, d, { opponent: false }));
-socket.on('match_start', () => {
+socket.on('match_start', (d) => {
   session.opponent = true;
+  session.mapSeed = Number.isInteger(d?.seed) ? d.seed : null;
   socket.emit('player_info', { name: session.name });
 });
 socket.on('opponent_left', ({ isHost }) => Object.assign(session, { isHost, opponent: false, opponentName: null }));

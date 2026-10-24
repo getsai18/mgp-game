@@ -11,7 +11,7 @@
 // Cada tema define el estilo de dibujo, la zona de muerte ('water' o 'void') y su altura (deathY;
 // en 'void' por defecto, 40 px por debajo del mapa), el color de luz ambiente (ambientLight) con el que
 // se oscurece el mapa, la intensidad de las luces (lightBoost) (systems/Lights.js) y el tipo de lámpara.
-// Rotan cada ronda: mapa = (ronda - 1) % MAPS.length (los dos clientes conocen la ronda).
+// Rotan cada ronda, alternando con mapas procedurales del mismo formato (mapGen.js: roundMap).
 import { TILE } from './level.js';
 
 const SOLID = '#%';
@@ -439,6 +439,7 @@ export function parse({ name, theme, rows }) {
   };
 }
 
-export const MAPS = RAW.map(parse);
+// themeIndex: estilo del mapa (música, y el estilo que copian los mapas generados en mapGen.js).
+export const MAPS = RAW.map((raw, i) => Object.assign(parse(raw), { themeIndex: i }));
 
-export const mapForRound = (round) => (round - 1) % MAPS.length;
+// La rotación de mapas por ronda (a mano y procedurales) está en mapGen.js: roundMap().

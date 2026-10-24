@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MAPS, parse, mapForRound } from '../../client/src/maps.js';
+import { MAPS, parse } from '../../client/src/maps.js';
 import NavGraph from '../../client/src/systems/NavGraph.js';
 import { TILE } from '../../client/src/level.js';
 
@@ -30,7 +30,6 @@ describe('Generador de mapas (ASCII -> geometría)', () => {
     expect(m.oneWays).toEqual([{ x: 4 * TILE, y: TILE, w: TILE }]);
     expect(m.spikes[0]).toMatchObject({ x: 3 * TILE, w: 2 * TILE, h: TILE / 2 });
     expect(m.deathY).toBe(5 * TILE + 40);
-    expect(mapForRound(7)).toBe(0); // rotan
   });
 
   it('el bot puede llegar a todas las armas y apariciones (sin zonas trampa)', () => {

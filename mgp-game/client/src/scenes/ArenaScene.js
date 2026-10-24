@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
 import { MAPS } from '../maps.js';
+import { generateMap, randomSeed } from '../mapGen.js';
 import { drawMapTiles, drawMapBackground } from '../mapTiles.js';
 import { socket, session, leaveRoom, quickMatch } from '../net.js';
 import { setDebugState } from '../debugState.js';
@@ -43,11 +44,14 @@ export default class ArenaScene extends Phaser.Scene {
   create() {
     // La escena se reutiliza al volver del menú: limpiar referencias de la partida anterior.
     this.leaving = false;
-    this.mapIndex = -1;
+    this.map = null;
+    this.practiceMap = 0; // M en práctica: los 6 mapas a mano y luego uno generado
     this.mapBg = null;
     this.mapLayer = null;
     this.botBrain = null;
     session.opponentName = this.mode === 'bot' ? BOT_NAME : null;
+    // Sin servidor (bot / práctica) la semilla de los mapas generados la pone este cliente.
+    if (this.mode !== 'online') session.mapSeed = randomSeed();
     if (this.mode === 'online' && !this.fromLobby) quickMatch(); // partida rápida: el servidor empareja
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
@@ -63,7 +67,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.juice = new Juice(this, this.platforms);
     this.glow = new Lights(this); // (this.lights es el plugin de luces de Phaser)
     this.createSplashes();
-    this.buildMap(0);
+    this.buildMap(MAPS[0]);
     this.createLocalPlayer();
     this.weapons = new WeaponSystem(this, this.platforms, this.player);
     this.createInput();
@@ -121,12 +125,12 @@ export default class ArenaScene extends Phaser.Scene {
   }
 
   // Inicio de ronda (lo llama RoundManager): todos a su sitio, mapa limpio.
-  resetRound(mapIndex = this.mapIndex) {
+  resetRound(map = this.map) {
     this.killCamPlayed = false;
     this.replay?.stop();
     this.lastHitOnMe = null;
     this.lastHitOnRemote = null;
-    if (mapIndex !== this.mapIndex) this.buildMap(mapIndex);
+    if (map !== this.map) this.buildMap(map);
     this.player.spawnPoint = this.map.spawns[session.playerIndex];
     this.player.respawn();
     if (this.botBrain) {
@@ -267,10 +271,9 @@ export default class ArenaScene extends Phaser.Scene {
   }
 
   // Construye (o cambia) el mapa: cuerpos físicos invisibles + gráficos horneados en una textura.
-  buildMap(index) {
-    const map = MAPS[index];
+  // `map`: uno de MAPS (a mano) o uno generado (mapGen.js); los dos tienen la misma forma.
+  buildMap(map) {
     this.map = map;
-    this.mapIndex = index;
 
     this.platforms.clear(true, true);
     for (const r of map.solids) {
@@ -308,7 +311,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.mapObjects = this.glow.setMap(map);
     this.createDeathZone(map);
     this.mapObjects.push(...createMapFx(this, map, bg.anchors)); // clima, antorchas y extras del tema
-    startMusic(index); // cada mapa transpone la música
+    startMusic(map.themeIndex ?? 0); // cada estilo de mapa transpone la música
   }
 
   // Agua helada (con oleaje y témpanos) o vacío (oscurece hacia abajo).
@@ -454,7 +457,8 @@ export default class ArenaScene extends Phaser.Scene {
     const kb = this.input.keyboard;
     kb.on('keydown-M', () => {
       if (this.round.phase !== 'solo') return;
-      this.resetRound((this.mapIndex + 1) % MAPS.length);
+      this.practiceMap = (this.practiceMap + 1) % (MAPS.length + 1);
+      this.resetRound(this.practiceMap < MAPS.length ? MAPS[this.practiceMap] : generateMap(randomSeed(), Phaser.Math.Between(0, MAPS.length - 1)));
       this.round.showBanner(this.map.name, '#ffffff', 800);
     });
     kb.on('keydown-N', () => this.toggleSound());

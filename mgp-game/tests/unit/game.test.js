@@ -134,6 +134,40 @@ describe('Autoridad del servidor (GameRoom)', () => {
     expect(room.player('a').pos).toMatchObject(A); // se queda la última posición válida
   });
 
+  it('no se puede volar: sin apoyo solo se sube lo que da un salto (o un impulso legal)', () => {
+    const jump = (id, from, dx = 0) => {
+      // Salto legal a 30 Hz: sube ~137 px y cae; todo 'ok'.
+      for (let t = 33; t <= 600; t += 33) {
+        clock.advance(33);
+        const s = t / 1000;
+        expect(place(id, from.x + (dx * t) / 600, Math.round(from.y - (620 * s - 700 * s * s)))).toBe('ok');
+      }
+    };
+    place('a', A.x, A.y);
+    jump('a', A);
+    // Trampa: subir sin parar en el aire (180 px/s). El servidor lo para y lo devuelve.
+    clock.advance(33);
+    place('a', A.x, A.y);
+    let verdict = 'ok';
+    let y = A.y;
+    for (let i = 0; i < 60 && verdict === 'ok'; i++) {
+      clock.advance(33);
+      y -= 6;
+      verdict = place('a', A.x, y);
+    }
+    expect(verdict).toBe('correct');
+    expect(A.y - y).toBeLessThan(200);
+    // Disparar apuntando abajo sí lanza hacia arriba (retroceso): ese impulso se acepta.
+    giveWeapon('b', 2);
+    at('b', A.x + 400, 300);
+    room.player('b').launch = { y: 300, at: clock.t, v0: 0 }; // en el aire, ya cayendo
+    clock.advance(33);
+    expect(place('b', A.x + 400, 240)).toBe('correct');
+    expect(room.onShoot('b', { w: 2, x: A.x + 400, y: 300, a: [90] })).toBe(true);
+    clock.advance(33);
+    expect(place('b', A.x + 400, 240)).toBe('ok');
+  });
+
   it('el servidor detecta la caída al agua con su mapa; dos muertes casi a la vez son empate', () => {
     at('b', 1400, 700);
     clock.advance(50);

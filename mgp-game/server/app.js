@@ -39,6 +39,30 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
   const privateByCode = new Map(); // código -> GameRoom
   let nextRoomId = 1;
 
+  // Lo que tarda el propio servidor (para separarlo de la red en la latencia): cuánto espera un mensaje
+  // en la cola del bucle de eventos (cada 0,5 s se mide lo que tarda en correr un setImmediate; no
+  // depende de la resolución de los temporizadores) y coste de validar cada movimiento (autoridad).
+  const queueWait = [];
+  const queueTimer = setInterval(() => {
+    const t0 = performance.now();
+    setImmediate(() => {
+      queueWait.push(performance.now() - t0);
+      if (queueWait.length > 240) queueWait.shift(); // últimos 2 minutos
+    });
+  }, 500).unref();
+  const moveCost = { n: 0, sumMs: 0, maxMs: 0 };
+  const serverCost = () => {
+    const sorted = [...queueWait].sort((a, b) => a - b);
+    const pct = (q) => (sorted.length ? +sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))].toFixed(2) : 0);
+    return {
+      queueWaitP50Ms: pct(0.5),
+      queueWaitP99Ms: pct(0.99),
+      moveValidationAvgMs: moveCost.n ? +(moveCost.sumMs / moveCost.n).toFixed(3) : 0,
+      moveValidationMaxMs: +moveCost.maxMs.toFixed(3),
+      movesValidated: moveCost.n,
+    };
+  };
+
   // ------------------------------------------------------------- HTTP
   // Tiempo de respuesta en la cabecera X-Response-Time (solo API: los estáticos van en streaming
   // y ya han enviado las cabeceras cuando terminan).
@@ -70,7 +94,7 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
   app.get('/health', (_req, res) => res.send('ok'));
   app.get('/api/test/health', (_req, res) => res.json({ status: 'ok', uptimeS: Math.round(process.uptime()), live: live() }));
   app.get('/api/test/ping', (_req, res) => res.json({ pong: true, serverTime: Date.now() }));
-  app.get('/api/test/telemetry', (_req, res) => res.json(telemetry.summary(live())));
+  app.get('/api/test/telemetry', (_req, res) => res.json({ ...telemetry.summary(live()), server: serverCost() }));
   app.get('/api/test/rooms', (_req, res) => res.json([...rooms.values()].map((r) => ({
     id: r.id, private: r.isPrivate, code: r.isPrivate ? r.code : null, phase: r.phase, round: r.round, map: r.map.name, score: r.score, players: r.players.length,
   }))));
@@ -93,7 +117,15 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
     res.status(201).json({ inserted, totalMatches: summary.matches, insertMs: +insertMs.toFixed(2), queryMs: +(performance.now() - q0).toFixed(3) });
   });
 
-  if (distDir) app.use(express.static(distDir));
+  // Los archivos de /assets llevan hash en el nombre (Vite): cambian de nombre en cada build, así que
+  // se pueden cachear un año. index.html no, para que siempre apunte al build actual.
+  if (distDir) {
+    app.use(express.static(distDir, {
+      setHeaders(res, file) {
+        if (/[\\/]assets[\\/]/.test(file)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    }));
+  }
 
   // ------------------------------------------------------------- salas
   function createRoom(opts = {}) {
@@ -223,7 +255,12 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
     });
 
     onGame('player_move', moveSchema, (room, d) => {
+      const t0 = performance.now();
       const verdict = room.onMove(socket.id, d);
+      const cost = performance.now() - t0;
+      moveCost.n++;
+      moveCost.sumMs += cost;
+      moveCost.maxMs = Math.max(moveCost.maxMs, cost);
       if (verdict === 'ok') socket.volatile.to(room.id).emit('player_move', d);
       // Dentro o a través de una pared: el servidor devuelve al jugador a su última posición válida.
       else if (verdict === 'correct') {
@@ -267,6 +304,7 @@ export function createGameServer({ telemetry = new Telemetry(), distDir } = {}) 
     },
     close() {
       for (const room of rooms.values()) room.stopMatch();
+      clearInterval(queueTimer);
       io.close();
       return new Promise((resolve) => httpServer.close(() => resolve()));
     },

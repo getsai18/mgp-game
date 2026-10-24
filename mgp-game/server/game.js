@@ -1,7 +1,8 @@
 import { WEAPONS, MAX_HP, THROWN_WEAPON, THROW, EXPLOSION, weaponRange, explosionDamage } from '../client/src/weapons.js';
 import { WINS_TO_MATCH, DRAW_WINDOW_MS, NEXT_ROUND_MS, NEXT_MATCH_MS } from '../client/src/rules.js';
 import { roundMap, randomSeed } from '../client/src/mapGen.js';
-import { illegalMove, environmentDeath, lineOfSight, rayDistance } from './arbiter.js';
+import { MOVE } from '../client/src/movement.js';
+import { illegalMove, environmentDeath, lineOfSight, rayDistance, supported, flying } from './arbiter.js';
 
 // Sala de juego con AUTORIDAD DEL SERVIDOR sobre lo que decide la partida:
 //  - vida y DAÑO: el cliente solo dice "le di con el arma w"; el servidor comprueba con su copia del
@@ -10,8 +11,9 @@ import { illegalMove, environmentDeath, lineOfSight, rayDistance } from './arbit
 //  - inventario: qué arma lleva cada uno, su munición y su cadencia (no se puede disparar sin arma,
 //    sin balas ni más rápido de lo que permite el arma);
 //  - armas del suelo: una recogida por arma (el primero que llega), el resto se rechaza;
-//  - movimiento y COLISIONES: posiciones dentro del mundo, sin teletransportes (velocidad máxima) y
-//    nunca dentro ni a través de una pared; si no, se corrige al cliente ('player_correct');
+//  - movimiento y COLISIONES: posiciones dentro del mundo, sin teletransportes (velocidad máxima),
+//    nunca dentro ni a través de una pared y SIN VOLAR (sin apoyo solo se sube lo que da un salto o un
+//    impulso legal; luego hay que caer); si no, se corrige al cliente ('player_correct');
 //  - MUERTES por el entorno (agua, vacío, pinchos): las detecta el servidor con el mapa de la ronda;
 //  - rondas, marcador y fin de partida (empates incluidos).
 // El cliente predice su propio movimiento para que el control sea instantáneo; el servidor
@@ -26,6 +28,13 @@ const HISTORY_MS = 600; // posiciones recientes de cada jugador (el que dispara 
 const BULLET_SLACK = 30; // px de margen alrededor de la trayectoria de una bala
 const BLAST_SLACK = 10; // px de margen en la distancia al centro de una explosión
 const DEAD_TIMEOUT_MS = 1500; // el cliente dice estar muerto y el servidor no lo vio: se da por muerto
+// Vuelo (arbiter.flying): velocidad de salida hacia arriba desde un apoyo y tras un impulso.
+const JUMP_V = MOVE.jumpVelocity; // el salto de pared (wallJumpVy) es menor
+const IMPULSE_V = 1700; // salto + retroceso apuntando abajo o explosión (blastImpulse) sumados
+const IMPULSE_MS = 400; // tras disparar o recibir un golpe, su impulso aún puede estar empujando
+const ROCKET_SLACK_MS = 500; // un cohete puede explotar cerca de cualquiera mientras vuela (+ red)
+const PACKET_GAP_MS = 150; // hueco entre paquetes (pestaña congelada, red): el reloj del salto se pausa
+const SEND_MS = 33; // los clientes mandan a 30 Hz
 
 export default class GameRoom {
   constructor({ id, code = null, isPrivate = false, passwordHash = null, telemetry = null, send, broadcast, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, prefetchMaps = null }) {
@@ -68,7 +77,7 @@ export default class GameRoom {
   addPlayer(id, name = 'Soldado') {
     if (this.full || this.player(id)) return null;
     const index = this.players.some((p) => p.index === 0) ? 1 : 0;
-    const p = { id, index, name, ready: false, hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], pos: null, history: [], deadSince: null, rejects: 0, fresh: true };
+    const p = { id, index, name, ready: false, hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], pos: null, history: [], deadSince: null, rejects: 0, fresh: true, launch: null, impulseUntil: 0 };
     this.players.push(p);
     return p;
   }
@@ -126,7 +135,7 @@ export default class GameRoom {
     this.items.clear();
     this.lastSpawnAt = -Infinity;
     void this.map; // normalmente ya está en la caché (mapPool); si no, se genera aquí
-    for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], history: [], deadSince: null, fresh: true, rejects: 0 });
+    for (const p of this.players) Object.assign(p, { hp: MAX_HP, alive: true, weapon: null, shots: [], throws: [], history: [], deadSince: null, fresh: true, rejects: 0, launch: null, impulseUntil: 0 });
   }
 
   // --------------------------------------------------------- validaciones
@@ -145,6 +154,7 @@ export default class GameRoom {
       const spawn = this.map.spawns[p.index];
       if (!alive || Math.hypot(x - spawn.x, y - spawn.y) > SPAWN_RADIUS) return 'reject';
       p.fresh = false;
+      p.launch = { y, at: now, v0: JUMP_V };
     } else if (playing && p.pos) {
       // Paredes y velocidad solo con el cuerpo vivo (al morir atraviesa el mapa dando vueltas).
       if (alive && p.pos.alive) {
@@ -156,6 +166,11 @@ export default class GameRoom {
         }
         if (illegalMove(this.map, p.pos, x, y)) {
           this.violations++;
+          return 'correct';
+        }
+        if (this.flies(p, x, y, now)) {
+          this.violations++;
+          p.launch = { y: p.pos.y, at: now, v0: 0 }; // desde donde se le devuelve solo puede caer
           return 'correct';
         }
       }
@@ -176,6 +191,25 @@ export default class GameRoom {
     p.history.push(p.pos);
     while (p.history.length && now - p.history[0].at > HISTORY_MS) p.history.shift();
     return 'ok';
+  }
+
+  // ¿Sube más de lo que permite su último apoyo o impulso? Si no, actualiza ese punto de partida.
+  flies(p, x, y, now) {
+    const gap = now - p.pos.at;
+    if (p.launch && gap > PACKET_GAP_MS) p.launch.at += gap - SEND_MS; // sin paquetes no corre el reloj
+    // Mientras dura un impulso (retroceso, golpe, cohete) puede salir disparado desde donde estaba.
+    if (now < p.impulseUntil) {
+      p.launch = { y: p.pos.y, at: p.pos.at, v0: IMPULSE_V };
+      return false;
+    }
+    if (p.launch && flying(p.launch, y, now, MOVE.maxFall)) return true;
+    // Nuevo punto de partida: apoyado y sin subir (subir pegado a una pared no recarga el salto).
+    if (y >= p.pos.y - 2 && supported(this.map, x, y)) p.launch = { y, at: now, v0: JUMP_V };
+    return false;
+  }
+
+  impulse(p, ms) {
+    p.impulseUntil = Math.max(p.impulseUntil, this.now() + ms);
   }
 
   kill(p, cause) {
@@ -216,6 +250,9 @@ export default class GameRoom {
     if (now < w.nextShotAt - def.cooldown * COOLDOWN_TOLERANCE) return false;
     w.ammo--;
     w.nextShotAt = now + def.cooldown;
+    // Retroceso (apuntando abajo lanza hacia arriba); un cohete puede empujar a cualquiera al explotar.
+    if (def.explosive) for (const q of this.players) this.impulse(q, def.life + ROCKET_SLACK_MS);
+    else this.impulse(p, IMPULSE_MS);
     p.shots.push({ w: d.w, at: now, x: d.x, y: d.y, a: d.a, hitsLeft: def.explosive ? 1 : d.a.length });
     if (p.shots.length > 8) p.shots.shift();
     if (w.ammo <= 0) p.weapon = null;
@@ -287,6 +324,7 @@ export default class GameRoom {
     }
     victim.hp = Math.max(0, victim.hp - damage);
     if (victim.hp === 0) this.kill(victim, 'hit');
+    this.impulse(victim, IMPULSE_MS); // el empuje del golpe (lo aplica al recibir el aviso)
     return { victim, hit: { d: damage, kx: d.kx, ky: d.ky, w: d.w } };
   }
 

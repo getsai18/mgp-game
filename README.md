@@ -11,16 +11,16 @@ y **autoridad del servidor** sobre la partida. Seis arenas, armas, bot con IA, c
 
 | Módulo | Implementación | Dónde |
 |---|---|---|
-| **1. Red y Sockets** | WebSockets (socket.io, solo transporte `websocket`). El servidor es autoritativo y tiene su propia copia del mapa (`server/arbiter.js`): **colisiones** (rechaza y corrige con `player_correct` cualquier posición dentro o a través de una pared, y teletransportes por velocidad), **muertes** por agua, vacío y pinchos (las detecta él, el cliente no las anuncia), **daño** (el cliente solo dice "le di con el arma w"; el servidor comprueba trayectoria, alcance y línea de visión contra las posiciones recientes del rival y calcula el daño, en las explosiones por distancia), inventario (arma, munición, cadencia), armas del suelo, apariciones (al empezar cada ronda solo se acepta al jugador en su punto) y rondas, marcador y fin de partida. Todos los mensajes se validan con esquemas **Zod** y tienen un límite por segundo. Ping/pong cada 2 s con la latencia en pantalla; la telemetría da media, mediana, p95 y % bajo 100 ms (sin medir con la pestaña en segundo plano). | `server/game.js`, `server/arbiter.js`, `server/app.js`, `server/schemas.js` |
+| **1. Red y Sockets** | WebSockets (socket.io, solo transporte `websocket`). El servidor es autoritativo y tiene su propia copia del mapa (`server/arbiter.js`): **colisiones** (rechaza y corrige con `player_correct` cualquier posición dentro o a través de una pared, teletransportes por velocidad y **vuelo**: sin apoyo solo se sube lo que da un salto o un impulso legal (retroceso, golpe, cohete) y luego hay que caer, con la gravedad y la caída máxima del juego y margen para el jitter de red), **muertes** por agua, vacío y pinchos (las detecta él, el cliente no las anuncia), **daño** (el cliente solo dice "le di con el arma w"; el servidor comprueba trayectoria, alcance y línea de visión contra las posiciones recientes del rival y calcula el daño, en las explosiones por distancia), inventario (arma, munición, cadencia), armas del suelo, apariciones (al empezar cada ronda solo se acepta al jugador en su punto) y rondas, marcador y fin de partida. Todos los mensajes se validan con esquemas **Zod** y tienen un límite por segundo. Ping/pong cada 2 s con la latencia en pantalla; la telemetría da media, mediana, p95 y % bajo 100 ms (sin medir con la pestaña en segundo plano) y, aparte, lo que tarda el propio servidor (espera en la cola de eventos y coste de validar cada movimiento, < 1 ms): el resto de la latencia es red. | `server/game.js`, `server/arbiter.js`, `server/app.js`, `server/schemas.js` |
 | **2. Motor y Controles** | Renderizado **Canvas 2D** (`Phaser.CANVAS`; tintes y mezclas en `systems/CanvasTint.js`). Bucle con *delta time*: la velocidad es la misma a 60, 120 o 144 Hz, y la física corre a paso fijo de 60 Hz. Contador de FPS en pantalla. En pantallas táctiles aparece una cruceta (abajo a la izquierda) y los botones de acción (abajo a la derecha); en PC se ocultan y se usa teclado (`keydown`/`keyup`) o mando. | `client/src/scenes/ArenaScene.js`, `client/src/touch.js`, `client/src/systems/Controls.js` |
 | **3. Endpoints de prueba** | `GET /api/test/telemetry`, `POST /api/test/seed`, `GET /api/test/health`, `GET /api/test/ping`, `GET /api/test/rooms`. Todos devuelven la cabecera `X-Response-Time`. | `server/app.js`, `server/telemetry.js` |
-| **4. Pruebas y CI/CD** | 38 pruebas Vitest (unitarias + integración) y 3 flujos E2E Playwright. Se ejecutan en GitHub Actions en cada push y Pull Request. | `mgp-game/tests/`, `.github/workflows/ci.yml` |
+| **4. Pruebas y CI/CD** | 39 pruebas Vitest (unitarias + integración) y 3 flujos E2E Playwright. Se ejecutan en GitHub Actions en cada push y Pull Request. | `mgp-game/tests/`, `.github/workflows/ci.yml` |
 | **5. Despliegue** | Producción en **Render** (Blueprint `render.yaml`, región Virginia, SSL automático y `wss://`), con despliegue automático en cada push a `main`. Un workflow hace ping a `/health` cada 10 min para que el plan gratuito no se duerma. | `render.yaml`, `.github/workflows/keepalive.yml` |
 
 ## Endpoints de prueba
 
 ```bash
-# Métricas agregadas: win rate (por lado y por jugador), KDR, supervivencia media, latencia (media, p50, p95), salas activas
+# Métricas agregadas: win rate (por lado y por jugador), KDR, supervivencia media, latencia (media, p50, p95) y coste del servidor (`server`), salas activas
 curl https://arena-caos.onrender.com/api/test/telemetry
 
 # Inyectar de 100 a 1000 partidas de prueba (reproducibles con "seed"; "reset" borra las anteriores)
@@ -52,7 +52,7 @@ Controles: `A`/`D` mover · `W` saltar · `S` apuntar abajo / atravesar platafor
 cd mgp-game
 npm ci
 npm run dev          # servidor (:3000) + cliente Vite (:5173)
-npm test             # Vitest: 38 pruebas unitarias / integración
+npm test             # Vitest: 39 pruebas unitarias / integración
 npm run test:e2e     # build + Playwright: 3 flujos E2E (requiere: npx playwright install chromium)
 npm run build && npm start   # producción en :3000
 ```
@@ -66,7 +66,7 @@ npm run build && npm start   # producción en :3000
   - esquemas Zod de payload;
   - interpolación de posiciones;
   - autoridad del servidor (cadencia, munición, daño calculado por el servidor, línea de visión,
-    paredes, muertes por agua / pinchos, aparición, rondas);
+    paredes, vuelo, muertes por agua / pinchos, aparición, rondas);
   - telemetría y API REST;
   - salas protegidas por WebSocket.
 - **E2E (Playwright):**

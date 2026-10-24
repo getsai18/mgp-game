@@ -43,7 +43,7 @@ export default class TitleScene extends Phaser.Scene {
       ? '◀ ▶ mover · ▼ bajar/apuntar abajo · ⤒ saltar · ✹ disparar · E arma · ☺ burla'
       : 'Teclado: A/D mover · W saltar · S agacharse/apuntar abajo · F disparar · E cambiar arma · Q burla\n' +
         'Mando: stick/cruceta · A saltar · X disparar · Y arma · LB burla      Móvil: botones en pantalla';
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 44, help,
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 38, help,
       { fontFamily: 'monospace', fontSize: isTouch ? '16px' : '12px', color: '#e8eef8', align: 'center', stroke: '#000000', strokeThickness: 3 },
     ).setOrigin(0.5);
 
@@ -58,11 +58,11 @@ export default class TitleScene extends Phaser.Scene {
   }
 
   createLogo() {
-    const logo = this.add.text(GAME_WIDTH / 2, 110, GAME_TITLE, {
+    const logo = this.add.text(GAME_WIDTH / 2, 100, GAME_TITLE, {
       fontFamily: 'monospace', fontSize: '72px', fontStyle: 'bold', color: '#ffffff', stroke: '#1b1d3a', strokeThickness: 10,
     }).setOrigin(0.5).setShadow(6, 6, '#000000', 0, true, true);
     this.tweens.add({ targets: logo, scale: 1.05, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.add.text(GAME_WIDTH / 2, 168, '1 VS 1 · ARMAS LOCAS · CAOS TOTAL', {
+    this.add.text(GAME_WIDTH / 2, 154, '1 VS 1 · ARMAS LOCAS · CAOS TOTAL', {
       fontFamily: 'monospace', fontSize: '16px', color: '#ffd27a', stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5);
   }
@@ -81,9 +81,9 @@ export default class TitleScene extends Phaser.Scene {
   createNameInput() {
     let saved = '';
     try { saved = localStorage.getItem('mgp-name') || ''; } catch { /* sin almacenamiento */ }
-    this.add.text(GAME_WIDTH / 2, 232, 'TU NOMBRE', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
-    this.nameInput = this.add.dom(GAME_WIDTH / 2, 262, 'input', [
-      'width: 220px', 'padding: 6px 10px', 'font: bold 18px monospace', 'text-align: center',
+    this.add.text(GAME_WIDTH / 2, 202, 'TU NOMBRE', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
+    this.nameInput = this.add.dom(GAME_WIDTH / 2, 230, 'input', [
+      'width: 264px', 'padding: 6px 10px', 'font: bold 18px monospace', 'text-align: center',
       'border: 3px solid #1b1d3a', 'border-radius: 6px', 'background: #f4f8ff', 'color: #1b1d3a', 'outline: none',
     ].join(';'));
     const el = this.nameInput.node;
@@ -95,16 +95,19 @@ export default class TitleScene extends Phaser.Scene {
   }
 
   createButtons() {
-    this.button(GAME_WIDTH / 2, 306, '▶ PARTIDA RÁPIDA', '#2e7d32', () => this.start('online'));
-    this.button(GAME_WIDTH / 2, 350, '🔒 SALA PRIVADA', '#1f5fa8', () => this.start('lobby'));
-    this.button(GAME_WIDTH / 2, 394, '🤖 VS BOT', '#8e2c2c', () => this.start('bot'));
-    this.button(GAME_WIDTH / 2, 438, 'PRÁCTICA (SOLO)', '#37474f', () => this.start('offline'));
+    // Mismo ancho para todos y 10 px de aire entre uno y otro (cada botón mide ~38 de alto).
+    const y0 = 284;
+    const gap = 48;
+    this.button(GAME_WIDTH / 2, y0, '▶ PARTIDA RÁPIDA', '#2e7d32', () => this.start('online'));
+    this.button(GAME_WIDTH / 2, y0 + gap, '🔒 SALA PRIVADA', '#1f5fa8', () => this.start('lobby'));
+    this.button(GAME_WIDTH / 2, y0 + gap * 2, '🤖 VS BOT', '#8e2c2c', () => this.start('bot'));
+    this.button(GAME_WIDTH / 2, y0 + gap * 3, 'PRÁCTICA (SOLO)', '#37474f', () => this.start('offline'));
   }
 
   button(x, y, label, bg, onClick) {
     const b = this.add.text(x, y, label, {
-      fontFamily: 'monospace', fontSize: '22px', fontStyle: 'bold', color: '#ffffff', backgroundColor: bg,
-      padding: { x: 18, y: 8 }, stroke: '#000000', strokeThickness: 3,
+      fontFamily: 'monospace', fontSize: '20px', fontStyle: 'bold', color: '#ffffff', backgroundColor: bg,
+      padding: { x: 18, y: 7 }, stroke: '#000000', strokeThickness: 3, fixedWidth: 290, align: 'center',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     b.on('pointerover', () => this.tweens.add({ targets: b, scale: 1.08, duration: 90 }));
     b.on('pointerout', () => this.tweens.add({ targets: b, scale: 1, duration: 90 }));

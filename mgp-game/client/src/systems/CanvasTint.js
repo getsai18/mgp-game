@@ -49,6 +49,9 @@ function tintedFrame(frame, color, fill) {
 const renderer = Phaser.Renderer.Canvas.CanvasRenderer.prototype;
 const batchSprite = renderer.batchSprite;
 renderer.batchSprite = function (sprite, frame, camera, parentMatrix) {
+  // Text.setResolution() solo cambia style.resolution; el Canvas escala con la de la textura (WebGL
+  // usa la del estilo). Sin esto los textos nítidos (resolución 1.5) salen 1.5 veces más grandes.
+  if (sprite.type === 'Text') frame.source.resolution = sprite.style.resolution;
   const tint = sprite.tintTopLeft;
   if (frame && sprite.type !== 'Text' && (sprite.tintFill || (tint !== undefined && tint !== 0xffffff))) {
     frame = tintedFrame(frame, quantize(tint), sprite.tintFill);

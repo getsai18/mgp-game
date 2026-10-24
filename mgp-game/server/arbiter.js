@@ -46,9 +46,9 @@ function* along(x0, y0, x1, y1, step) {
 }
 
 // Posición imposible: el cuerpo está dentro de una pared, o la atravesó yendo rápido.
-// Márgenes: `shrink` px perdona el redondeo; el barrido usa un núcleo más pequeño porque la
+// Márgenes: `shrink` px perdona el redondeo y lo que se hunde el cuerpo al aterrizar rápido; el barrido usa un núcleo más pequeño porque la
 // trayectoria real es curva (salto) y la recta entre dos paquetes puede rozar una esquina.
-const SHRINK = 1;
+const SHRINK = 3;
 const SWEEP_SHRINK = 4;
 const SWEEP_MIN_DIST = 40;
 export function illegalMove(map, from, x, y) {
@@ -94,4 +94,47 @@ export function rayDistance(x, y, deg, px, py) {
   const ax = px - x;
   const ay = py - y;
   return { along: ax * dx + ay * dy, perp: Math.abs(ax * dy - ay * dx) };
+}
+
+// --------------------------------------------------------------- vuelo
+// El servidor no simula la física, pero sí acota la altura: sin apoyo, un cuerpo solo sube lo que le da
+// el último salto o impulso legal y luego tiene que caer (gravedad de client/src/main.js, caída máxima
+// de client/src/movement.js). Se usa la gravedad del mundo sin la extra de caída: el límite es holgado.
+const GRAVITY = 1400;
+const SUPPORT_GAP = 3; // px entre el cuerpo y el suelo / la pared que cuentan como "apoyado"
+// s de margen por jitter de red: los paquetes llegan con retraso variable y a veces en ráfaga (varios a
+// la vez), así que el tiempo entre dos llegadas puede ser mayor o menor que el real entre los envíos.
+const RISE_TIME_SLACK = 0.25;
+const RISE_SLACK = 24; // px de margen (redondeo, estiramiento del sprite, coyote time)
+
+// ¿Pisa suelo o plataforma, o está pegado a una pared (o al borde del mundo)? Desde ahí puede saltar.
+export function supported(map, x, y) {
+  const b = bodyRect(x, y);
+  const row = map.rows[Math.floor((b.b + SUPPORT_GAP) / TILE)];
+  const floor = (px) => {
+    const ch = row?.[Math.floor(px / TILE)];
+    return ch === '#' || ch === '%' || ch === '-';
+  };
+  if (floor(b.l + 1) || floor(x) || floor(b.r - 1)) return true;
+  if (b.l - SUPPORT_GAP <= 0 || b.r + SUPPORT_GAP >= map.width) return true;
+  return [b.t + 4, (b.t + b.b) / 2, b.b - 4].some((py) => solidAt(map, b.l - SUPPORT_GAP, py) || solidAt(map, b.r + SUPPORT_GAP, py));
+}
+
+// Altura (px) ganada a los t s de salir hacia arriba a v0 px/s, con la caída limitada a maxFall.
+function heightAt(v0, t, maxFall) {
+  const tc = (v0 + maxFall) / GRAVITY; // instante en que alcanza la caída máxima
+  if (t <= tc) return v0 * t - (GRAVITY * t * t) / 2;
+  return v0 * tc - (GRAVITY * tc * tc) / 2 - maxFall * (t - tc);
+}
+
+// Lo más alto que puede estar a los t s (± RISE_TIME_SLACK): negativo = ya tiene que haber bajado.
+export function maxRise(v0, t, maxFall) {
+  const lo = Math.max(0, t - RISE_TIME_SLACK);
+  const apex = Math.min(Math.max(v0 / GRAVITY, lo), t + RISE_TIME_SLACK);
+  return heightAt(v0, apex, maxFall);
+}
+
+// launch = { y, at, v0 }: último apoyo o impulso. ¿La posición y (a `now` ms) está más alta de lo posible?
+export function flying(launch, y, now, maxFall) {
+  return launch.y - y > maxRise(launch.v0, (now - launch.at) / 1000, maxFall) + RISE_SLACK;
 }

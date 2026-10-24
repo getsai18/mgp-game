@@ -26,6 +26,24 @@ AWS CLI en Windows: `C:\Program Files\Amazon\AWSCLIV2\aws.exe`. En Git Bash, ant
 | Apagada (stopped) | ~$0.64 USD/mes (solo el disco) |
 | Terminada | $0 (se borra todo) |
 
+## HTTPS (producción)
+
+Cada arranque, el script de la instancia (user-data, se ejecuta siempre):
+- devuelve el SSH al puerto 22 (el 443 queda para HTTPS);
+- escribe el Caddyfile para `https://<ip-con-guiones>.sslip.io` (certificado Let's Encrypt automático) y para `http://<ip>`;
+- ejecuta `update.sh` (el juego escucha en el **puerto 3000**, detrás de Caddy).
+
+La URL cambia con la IP: `https://54-162-107-181.sslip.io` mientras la IP sea `54.162.107.181`.
+El dominio actual queda en `/home/ubuntu/domain.txt` y en la consola serie (`ARENA_DOMAIN=`).
+
+**Repositorio privado:** `git pull` falla sin credenciales. Despliegue desde el PC:
+```bash
+git archive --format=tar.gz -o app.tgz HEAD mgp-game
+scp -i ~/.ssh/arena-caos-key.pem app.tgz ubuntu@<IP>:~/app.tgz
+# en el servidor: extraer en ~/mgp-game/mgp-game, npm ci, npm run build, PORT=3000 pm2 restart arena --update-env
+```
+(Si la llave da `error in libcrypto`, quitarle los fin de línea CRLF: `tr -d '' < llave.pem > llave-lf.pem`.)
+
 ## Encender
 
 ```bash

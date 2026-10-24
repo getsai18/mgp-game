@@ -34,3 +34,18 @@ jobs:
             mgp-game/playwright-report
             mgp-game/test-results
           retention-days: 7
+
+  # Despliegue en Render solo si las pruebas pasan y es un push a main (no en Pull Requests).
+  # Necesita el secreto del repositorio RENDER_API_KEY (Settings -> Secrets and variables -> Actions).
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pedir el deploy a Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          curl -fsS -X POST "https://api.render.com/v1/services/srv-dbeea2vb9u1s739e68gg/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+            -d "{\"commitId\": \"$GITHUB_SHA\"}"

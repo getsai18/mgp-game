@@ -3,6 +3,17 @@ import { test, expect } from '@playwright/test';
 // Estado del juego expuesto en el DOM para las pruebas (client/src/debugState.js).
 const state = (page) => page.locator('#game-state');
 
+// Dos jugadores en contextos aislados; se cierran al terminar para no dejar juegos corriendo (CI va sin GPU).
+let contexts = [];
+async function twoPlayers(browser) {
+  contexts = [await browser.newContext(), await browser.newContext()];
+  return Promise.all(contexts.map((c) => c.newPage()));
+}
+test.afterEach(async () => {
+  await Promise.all(contexts.map((c) => c.close()));
+  contexts = [];
+});
+
 // Abre el juego y entra en la pantalla de sala privada.
 async function openLobby(page) {
   await page.goto('/');
@@ -12,8 +23,7 @@ async function openLobby(page) {
 }
 
 test('Flujo 1 · Autenticación: credenciales inválidas rechazadas y sala protegida', async ({ browser }) => {
-  const host = await browser.newPage();
-  const guest = await browser.newPage();
+  const [host, guest] = await twoPlayers(browser);
   const code = `A${Date.now() % 100000}`;
 
   await openLobby(host);
@@ -36,8 +46,7 @@ test('Flujo 1 · Autenticación: credenciales inválidas rechazadas y sala prote
 });
 
 test('Flujo 2 · Lobby: crear sala, marcar "Listo" y conectar los sockets de la partida', async ({ browser }) => {
-  const host = await browser.newPage();
-  const guest = await browser.newPage();
+  const [host, guest] = await twoPlayers(browser);
   const code = `L${Date.now() % 100000}`;
 
   await openLobby(host);

@@ -2,28 +2,22 @@ import { GAME_WIDTH } from '../level.js';
 import { PLAYER_COLORS } from '../entities/Player.js';
 import { MAPS, mapForRound } from '../maps.js';
 import { socket, session, send } from '../net.js';
-import { play } from '../audio.js';
+import { play, setMusicIntensity } from '../audio.js';
+import {
+  WINS_TO_MATCH, DRAW_WINDOW_MS, BANNER_MS, REPLAY_AT_MS, REPLAY_FROM_AGO_MS, REPLAY_TO_AGO_MS, REPLAY_SPEED,
+  REPLAY_END_MS, NEXT_ROUND_MS, NEXT_MATCH_MS,
+} from '../rules.js';
 
-const WINS_TO_MATCH = 5;
-const DRAW_WINDOW_MS = 250; // dos muertes dentro de esta ventana = empate
-// Entre rondas: cartel (~1 s) -> repetición de la jugada (~2.7 s a x0.6) -> siguiente ronda.
-// Fin de partida: igual y luego el cartel de campeón.
-const BANNER_MS = 950;
-const REPLAY_AT_MS = 1000;
-const REPLAY_FROM_AGO_MS = 2300; // tramo grabado: de 2.3 s antes a 0.7 s antes del inicio de la repetición
-const REPLAY_TO_AGO_MS = 700;
-const REPLAY_SPEED = 0.6;
-const REPLAY_END_MS = REPLAY_AT_MS + (REPLAY_FROM_AGO_MS - REPLAY_TO_AGO_MS) / REPLAY_SPEED;
-const NEXT_ROUND_MS = Math.round(REPLAY_END_MS + 350);
-const NEXT_MATCH_MS = Math.round(REPLAY_END_MS + 3600);
 const SOLO_RESPAWN_MS = 1200;
 const NAMES = ['AZUL', 'ROJO']; // si alguien no tiene nombre
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 
-// Rondas 1vs1 con el host como árbitro (el servidor sigue sin lógica).
-//   invitado -> host:  round_end { r, loser }                  "he muerto en la ronda r"
-//   host -> invitado:  round_end { r, winner, score, match }    veredicto (winner -1 = empate)
+// Rondas 1vs1. Online arbitra el SERVIDOR (server/game.js): cada cliente avisa de su muerte y
+// el servidor (que además lleva la vida de cada uno) emite el veredicto a los dos.
+//   cliente -> servidor:  round_end { r, loser }                  "he muerto en la ronda r"
+//   servidor -> ambos:    round_end { r, winner, score, match }    veredicto (winner -1 = empate)
+// VS BOT (sin red) arbitra este mismo cliente con registerDeath().
 // Fases: 'solo' (sin rival, reaparición libre), 'playing', 'ended' (entre rondas).
 export default class RoundManager {
   constructor(scene) {
@@ -88,6 +82,7 @@ export default class RoundManager {
     this.cancelTimers();
     this.phase = 'solo';
     this.score = [0, 0];
+    setMusicIntensity(false);
     this.round = 1;
     this.banner.setVisible(false);
     this.renderScore();
@@ -100,6 +95,7 @@ export default class RoundManager {
     this.decideTimer = null;
     const mapIndex = mapForRound(this.round);
     this.scene.resetRound(mapIndex);
+    setMusicIntensity(this.score.some((n) => n === WINS_TO_MATCH - 1)); // punto de partido: más caña
     this.renderScore();
     this.showBanner(`RONDA ${this.round}\n${MAPS[mapIndex].name}`, '#ffffff', 1000);
     play('round');
@@ -109,8 +105,8 @@ export default class RoundManager {
     if (this.phase === 'solo') {
       this.nextTimer = this.scene.time.delayedCall(SOLO_RESPAWN_MS, () => this.scene.player.respawn());
     } else if (this.phase === 'playing') {
-      if (session.isHost) this.registerDeath(session.playerIndex);
-      else send('round_end', { r: this.round, loser: session.playerIndex });
+      if (this.scene.mode === 'online') send('round_end', { r: this.round, loser: session.playerIndex });
+      else this.registerDeath(session.playerIndex);
     }
     // 'ended': ya hay veredicto; reaparecerá al empezar la siguiente ronda.
   }
@@ -121,16 +117,12 @@ export default class RoundManager {
   }
 
   onRoundEnd(d) {
-    if (!d || d.r !== this.round) return;
-    if (session.isHost) {
-      // Aviso de muerte del invitado.
-      if (this.phase === 'playing' && (d.loser === 0 || d.loser === 1)) this.registerDeath(d.loser);
-    } else if (Array.isArray(d.score)) {
-      this.applyVerdict(d);
-    }
+    // Solo veredictos del servidor (los avisos de muerte del rival ya no llegan: los procesa él).
+    if (!d || d.r !== this.round || !Array.isArray(d.score)) return;
+    this.applyVerdict(d);
   }
 
-  // Solo host: espera un poco por si es empate y emite el veredicto.
+  // Solo VS BOT (online lo hace el servidor): espera un poco por si es empate y aplica el veredicto.
   registerDeath(index) {
     this.deaths.add(index);
     if (this.decideTimer) return;
@@ -139,9 +131,7 @@ export default class RoundManager {
       const score = [...this.score];
       if (winner >= 0) score[winner]++;
       const match = winner >= 0 && score[winner] >= WINS_TO_MATCH ? winner : -1;
-      const verdict = { r: this.round, winner, score, match };
-      send('round_end', verdict);
-      this.applyVerdict(verdict);
+      this.applyVerdict({ r: this.round, winner, score, match });
     });
   }
 

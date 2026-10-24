@@ -42,9 +42,11 @@ export function onQualityChange(fn) {
 
 // Llamar cada frame: baja a 'low' si el juego va lento y el jugador no eligió calidad.
 let slowSince = 0;
+// Con la pestaña oculta el navegador frena los fotogramas: eso no significa que el equipo sea lento.
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => (slowSince = 0));
 export function watchFps(game, time) {
   if (userChose || quality === 'low') return;
-  if (game.loop.actualFps >= LOW_FPS) {
+  if (document.hidden || game.loop.actualFps >= LOW_FPS) {
     slowSince = 0;
   } else if (!slowSince) {
     slowSince = time;

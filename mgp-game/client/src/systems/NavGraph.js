@@ -1,5 +1,5 @@
 import { TILE } from '../level.js';
-import { MOVE } from '../entities/Player.js';
+import { MOVE } from '../movement.js';
 
 // Grafo de navegación de un mapa para el bot (se calcula una vez por mapa y se guarda en caché).
 //  - Nodo: casilla donde cabe un jugador de pie (3 casillas libres) sobre suelo, sin pinchos

@@ -3,6 +3,7 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT } from './level.js';
 import BootScene from './scenes/BootScene.js';
 import TitleScene from './scenes/TitleScene.js';
 import ArenaScene from './scenes/ArenaScene.js';
+import LobbyScene from './scenes/LobbyScene.js';
 import { socket, session } from './net.js';
 import { ChromaticFX } from './systems/Gfx.js';
 
@@ -21,8 +22,10 @@ const game = new Phaser.Game({
   input: { gamepad: true },
   dom: { createContainer: true }, // campo de nombre en la pantalla de título
   pipeline: { ChromaticFX }, // shader propio de post-procesado (systems/Gfx.js)
-  scene: [BootScene, TitleScene, ArenaScene],
+  scene: [BootScene, TitleScene, LobbyScene, ArenaScene],
 });
 
-// Acceso desde la consola / pruebas automáticas, solo en desarrollo.
+// Acceso desde la consola, solo en desarrollo.
 if (import.meta.env.DEV) Object.assign(window, { game, socket, session });
+// Ganchos de las pruebas E2E (tests/e2e): solo lectura del estado y cambio de escena.
+Object.assign(window, { __game: game, __socket: socket });

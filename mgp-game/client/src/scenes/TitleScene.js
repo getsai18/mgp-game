@@ -7,6 +7,7 @@ import { skinKey, PLAYER_COLORS } from '../skins.js';
 import { session } from '../net.js';
 import { unlockAudio, play, toggleMute, isMuted } from '../audio.js';
 import { isTouch, enterFullscreen } from '../touch.js';
+import { setDebugState } from '../debugState.js';
 
 export const GAME_TITLE = 'ARENA CAOS';
 const NAME_MAX = 12;
@@ -53,6 +54,7 @@ export default class TitleScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ENTER', () => this.start('online'));
     this.input.gamepad?.once('down', () => this.start('online'));
     for (const o of this.children.list) o.setResolution?.(RENDER_SCALE); // textos nítidos con el zoom
+    setDebugState({ scene: 'title' });
   }
 
   createLogo() {
@@ -93,9 +95,10 @@ export default class TitleScene extends Phaser.Scene {
   }
 
   createButtons() {
-    this.button(GAME_WIDTH / 2, 314, '▶ JUGAR ONLINE', '#2e7d32', () => this.start('online'));
-    this.button(GAME_WIDTH / 2, 364, '🤖 VS BOT', '#8e2c2c', () => this.start('bot'));
-    this.button(GAME_WIDTH / 2, 414, 'PRÁCTICA (SOLO)', '#37474f', () => this.start('offline'));
+    this.button(GAME_WIDTH / 2, 306, '▶ PARTIDA RÁPIDA', '#2e7d32', () => this.start('online'));
+    this.button(GAME_WIDTH / 2, 350, '🔒 SALA PRIVADA', '#1f5fa8', () => this.start('lobby'));
+    this.button(GAME_WIDTH / 2, 394, '🤖 VS BOT', '#8e2c2c', () => this.start('bot'));
+    this.button(GAME_WIDTH / 2, 438, 'PRÁCTICA (SOLO)', '#37474f', () => this.start('offline'));
   }
 
   button(x, y, label, bg, onClick) {
@@ -130,6 +133,6 @@ export default class TitleScene extends Phaser.Scene {
     session.name = name;
     try { localStorage.setItem('mgp-name', name); } catch { /* sin almacenamiento */ }
     this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Arena', { mode }));
+    this.cameras.main.once('camerafadeoutcomplete', () => (mode === 'lobby' ? this.scene.start('Lobby') : this.scene.start('Arena', { mode })));
   }
 }

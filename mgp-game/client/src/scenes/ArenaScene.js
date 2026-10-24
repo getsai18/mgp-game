@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH } from '../level.js';
+import { GAME_WIDTH, GAME_HEIGHT } from '../level.js';
 import { MAPS } from '../maps.js';
 import { drawMapTiles, drawMapBackground } from '../mapTiles.js';
-import { socket, session, leaveRoom } from '../net.js';
+import { socket, session, leaveRoom, quickMatch } from '../net.js';
+import { setDebugState } from '../debugState.js';
 import Player, { PLAYER_COLORS } from '../entities/Player.js';
 import RemotePlayer, { packState } from '../entities/RemotePlayer.js';
 import WeaponSystem from '../systems/WeaponSystem.js';
@@ -18,10 +19,12 @@ import Lights from '../systems/Lights.js';
 import CameraDirector from '../systems/CameraDirector.js';
 import createMapFx from '../systems/MapFx.js';
 import { MAX_HP, weaponName } from '../weapons.js';
-import { play, startMusic, toggleMute, isMuted, setAudioListener } from '../audio.js';
+import { play, playVoice, startMusic, toggleMute, isMuted, setAudioListener } from '../audio.js';
 import { isTouch, showTouchControls, hideTouchControls, setSoundIcon, toggleFullscreen } from '../touch.js';
 
 const PLACES = { water: 'AL AGUA', void: 'AL VACÍO', spikes: 'A LOS PINCHOS', hit: '' };
+// Tono de voz de cada personaje (el jugador 2 algo más agudo) para los quejidos.
+const voicePitch = (p) => (p?.skin ? 1.22 : 1);
 const SEND_INTERVAL_MS = 50; // 20 Hz
 const IDLE_RESEND_MS = 250; // si nada cambia, reenviar solo cada 250 ms
 
@@ -31,8 +34,10 @@ export default class ArenaScene extends Phaser.Scene {
   }
 
   // mode: 'online' (conecta y espera rival practicando) | 'offline' (práctica sin conexión) | 'bot' (VS BOT sin conexión)
+  // lobby: true si se llega desde una sala privada (ya conectado y con la partida empezada).
   init(data) {
     this.mode = data?.mode ?? 'online';
+    this.fromLobby = !!data?.lobby;
   }
 
   create() {
@@ -43,7 +48,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.mapLayer = null;
     this.botBrain = null;
     session.opponentName = this.mode === 'bot' ? BOT_NAME : null;
-    if (this.mode === 'online' && !socket.connected) socket.connect();
+    if (this.mode === 'online' && !this.fromLobby) quickMatch(); // partida rápida: el servidor empareja
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
     // Sin suelo ni techo en los límites del mundo: se cae al agua / al vacío y se puede volar hacia arriba.
@@ -68,6 +73,8 @@ export default class ArenaScene extends Phaser.Scene {
     this.replay = new Replay(this);
     this.stats = new Stats(this);
     this.events.once('shutdown', () => this.replay.stop());
+    // Lo del mapa que no es un objeto de la escena (temporizadores, avisos de calidad) también se suelta al salir.
+    this.events.once('shutdown', () => this.mapObjects.forEach((o) => o.destroy?.()));
     this.lastHitOnMe = null; // { w, at }: para saber quién nos mandó al agua / vacío
     this.lastHitOnRemote = null;
     this.round = new RoundManager(this);
@@ -75,6 +82,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.weapons.onDealtHit = (w) => (this.lastHitOnRemote = { w, at: this.time.now });
     if (this.mode === 'bot') this.round.startMatch(); // el bot ya existe: arrancar la partida
     this.hpBars = this.add.graphics().setDepth(20);
+    this.offscreen = this.juice.ui(this.add.graphics().setDepth(99)); // flechas de jugadores fuera de cuadro
     const nameStyle = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 };
     this.nameTags = [0, 1].map(() => this.add.text(0, 0, '', nameStyle).setOrigin(0.5, 1).setDepth(20).setResolution(2)); // nítidos con zoom
   }
@@ -94,6 +102,7 @@ export default class ArenaScene extends Phaser.Scene {
     this.banter.update(time);
     this.sendState(time);
     this.drawHpBars();
+    this.updateHud(time);
     this.camDirector.update(delta);
     if (this.round.phase !== 'solo') {
       const w = this.weapons;
@@ -133,14 +142,18 @@ export default class ArenaScene extends Phaser.Scene {
   // Efecto según dónde murió: agua -> salpicadura; vacío -> nada (ya salió de pantalla); resto -> sangre.
   deathEffect(x, y, local) {
     const { deathY, theme } = this.map;
+    const pitch = voicePitch(local ? this.player : this.remote);
     if (theme.death === 'water' && y > deathY - 40) {
       this.waterSplash.explode(45, x, deathY);
       play('splash', x);
+      playVoice('hurt', x, pitch * 0.85);
     } else if (y < this.map.height - 10) {
       this.weapons.blood.explode(45, x, y);
       play('death', x);
+      playVoice('death', x, pitch);
     } else {
       play('fall', x, 0.7);
+      playVoice('fall', x, pitch);
     }
     this.cameras.main.shake(local ? 250 : 180, local ? 0.016 : 0.01);
     this.replay?.event('death', x, y);
@@ -166,6 +179,7 @@ export default class ArenaScene extends Phaser.Scene {
     play('hit', this.player.x);
     this.weapons.blood.explode(10, this.player.x, this.player.y);
     if (!this.player.hurt(dmg, kx, ky)) {
+      playVoice('hurt', this.player.x, voicePitch(this.player)); // si muere, grita en deathEffect
       this.cameras.main.shake(90, 0.008);
       this.juice.hitStop(60);
     }
@@ -219,6 +233,7 @@ export default class ArenaScene extends Phaser.Scene {
       tag.setVisible(show);
       if (show) tag.setText(name).setPosition(p.x, p.y - 32).setColor(`#${p.color.toString(16)}`);
     });
+    this.drawOffscreenArrows();
     const g = this.hpBars.clear();
     for (const p of [this.player, this.remote]) {
       if (!p || !p.alive || !p.visible) continue;
@@ -227,6 +242,27 @@ export default class ArenaScene extends Phaser.Scene {
         g.fillStyle(0x000000, 0.6).fillRect(x - 1, p.y - 30, 7, 5);
         g.fillStyle(i < p.hp ? p.color : 0x333344).fillRect(x, p.y - 29, 5, 3);
       }
+    }
+  }
+
+  // Jugador fuera de lo que enseña la cámara (volando por encima del mapa, p. ej. con un cohete):
+  // flecha de su color en el borde de la pantalla, apuntando hacia él.
+  drawOffscreenArrows() {
+    const g = this.offscreen.clear();
+    const view = this.cameras.main.worldView;
+    for (const p of [this.player, this.remote]) {
+      if (!p || !p.alive || !p.visible || this.camDirector.sees(p.x, p.y, -8)) continue;
+      const ux = ((p.x - view.x) / view.width) * GAME_WIDTH;
+      const uy = ((p.y - view.y) / view.height) * GAME_HEIGHT;
+      const x = Phaser.Math.Clamp(ux, 16, GAME_WIDTH - 16);
+      const y = Phaser.Math.Clamp(uy, 66, GAME_HEIGHT - 16); // arriba, por debajo del marcador
+      const a = Math.atan2(uy - y, ux - x);
+      const pt = (ang, r) => [x + Math.cos(ang) * r, y + Math.sin(ang) * r];
+      const [ax, ay] = pt(a, 11);
+      const [bx, by] = pt(a + 2.4, 9);
+      const [cx, cy] = pt(a - 2.4, 9);
+      g.fillStyle(0x000000, 0.7).fillCircle(x, y, 12);
+      g.fillStyle(p.color).fillTriangle(ax, ay, bx, by, cx, cy);
     }
   }
 
@@ -454,7 +490,24 @@ export default class ArenaScene extends Phaser.Scene {
     this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Title'));
   }
 
+  // FPS y latencia (ping/pong con el servidor) + estado para las pruebas automáticas.
+  updateHud(time) {
+    if (time - (this.hudAt ?? 0) < 250) return;
+    this.hudAt = time;
+    const fps = Math.round(this.game.loop.actualFps);
+    const ping = this.mode === 'online' && session.latency !== null ? ` · PING ${session.latency} ms` : '';
+    this.perfLabel.setText(`${fps} FPS${ping}`).setColor(session.latency > 100 ? '#ff9a7a' : '#9affb0');
+    const p = this.player;
+    setDebugState({
+      scene: 'arena', mode: this.mode, room: session.roomId ?? '', opponent: session.opponent ? '1' : '0',
+      x: Math.round(p.x), y: Math.round(p.y), alive: p.alive ? '1' : '0', map: this.map.name, fps, ping: session.latency ?? '',
+    });
+  }
+
   createNetStatus() {
+    this.perfLabel = this.juice.ui(this.add
+      .text(isTouch ? 64 : 10, 28, '', { fontFamily: 'monospace', fontSize: '11px', color: '#9affb0', stroke: '#000000', strokeThickness: 3 })
+      .setDepth(100));
     const label = this.juice.ui(this.add
       .text(isTouch ? 64 : 10, 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 })
       .setDepth(100));

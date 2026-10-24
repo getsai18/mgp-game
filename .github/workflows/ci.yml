@@ -1,0 +1,36 @@
+# CI: pruebas unitarias/integración (Vitest) y E2E (Playwright) en cada push y Pull Request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mgp-game
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mgp-game/package-lock.json
+      - run: npm ci
+      - name: Pruebas unitarias e integración (Vitest)
+        run: npm run test:unit
+      - name: Instalar Chromium para Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Pruebas E2E (Playwright)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            mgp-game/playwright-report
+            mgp-game/test-results
+          retention-days: 7

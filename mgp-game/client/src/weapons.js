@@ -52,3 +52,31 @@ export function randomWeaponType() {
   }
   return 1;
 }
+
+// Daño de una explosión según la distancia al centro: 2 (mata) en el núcleo, 1 en el resto del radio.
+export function explosionDamage(dist) {
+  if (dist > EXPLOSION.radius) return 0;
+  return dist <= EXPLOSION.radius * EXPLOSION.coreRatio ? 2 : 1;
+}
+
+// Empuje de una explosión sobre un cuerpo a `dist` px: lineal de force (centro) a minForce (borde),
+// siempre con algo hacia arriba para que salga volando. (nx, ny) = dirección centro -> cuerpo.
+export function blastImpulse(nx, ny, dist) {
+  const force = EXPLOSION.minForce + (EXPLOSION.force - EXPLOSION.minForce) * (1 - dist / EXPLOSION.radius);
+  return [nx * force, Math.min(ny, -0.35) * force];
+}
+
+// Daño máximo que puede traer un solo aviso de impacto con el arma `w` (lo valida el servidor).
+export function maxHitDamage(w) {
+  if (w === THROWN_WEAPON) return THROW.damage;
+  const def = WEAPONS[w];
+  if (!def) return 0;
+  return def.explosive ? 2 : def.damage;
+}
+
+// Alcance máximo creíble de un disparo (px): lo que vuela la bala en su vida, más la onda expansiva.
+export function weaponRange(w) {
+  if (w === THROWN_WEAPON) return (THROW.speed * THROW.lifeMs) / 1000;
+  const def = WEAPONS[w];
+  return def ? (def.speed * def.life) / 1000 * 1.2 + (def.explosive ? EXPLOSION.radius : 0) : 0;
+}

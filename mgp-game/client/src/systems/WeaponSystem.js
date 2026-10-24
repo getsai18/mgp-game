@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH } from '../level.js';
-import { WEAPONS, EXPLOSION, THROW, THROWN_WEAPON, randomWeaponType } from '../weapons.js';
+import { WEAPONS, EXPLOSION, THROW, THROWN_WEAPON, randomWeaponType, explosionDamage, blastImpulse } from '../weapons.js';
 import { socket, session, send } from '../net.js';
-import { play } from '../audio.js';
+import { play, playVoice } from '../audio.js';
 import { isTouch } from '../touch.js';
 
 const FIRST_SPAWN_MS = 1000;
@@ -53,6 +53,7 @@ export default class WeaponSystem {
     this.localKick = 0; // retroceso visual del arma en la mano (px)
     this.remoteKick = 0;
     this.lastHitStopAt = 0;
+    this.lastGruntAt = 0;
 
     this.localHeld = scene.add.image(0, 0, 'pistol').setVisible(false).setDepth(5);
     this.remoteHeld = scene.add.image(0, 0, 'pistol').setVisible(false).setDepth(5);
@@ -109,6 +110,10 @@ export default class WeaponSystem {
       weapon_pickup: (d) => this.onRemotePickup(d),
       player_shoot: (d) => this.onRemoteShoot(d),
       weapon_throw: (d) => this.onRemoteThrow(d),
+      // El servidor no nos dio el arma (el rival llegó antes): soltarla.
+      weapon_denied: (d) => {
+        if (d && this.local?.id === d.id) this.discardLocal();
+      },
       joined: () => {
         // (Re)conexión: sala nueva, empezamos limpios.
         this.clearItems();
@@ -427,6 +432,12 @@ export default class WeaponSystem {
     this.onDealtHit?.(w);
     this.scene.stats?.hit('me');
     const hit = { d, kx: Math.round(kx), ky: Math.round(ky), w };
+    // Quejido del rival al recibir el golpe (si no lo mata: entonces grita al morir). Uno por ráfaga.
+    const r = this.remote;
+    if (r?.alive && d < r.hp && this.scene.time.now - this.lastGruntAt > 150) {
+      this.lastGruntAt = this.scene.time.now;
+      playVoice('hurt', r.x, r.skin ? 1.22 : 1);
+    }
     if (this.remoteIsBot) this.scene.botTakeHit(hit);
     else send('player_hit', hit);
   }
@@ -448,13 +459,13 @@ export default class WeaponSystem {
       const rd = Phaser.Math.Distance.Between(r.x, r.y, x, y);
       if (rd <= EXPLOSION.radius) {
         if (this.remoteIsBot) r.applyImpulse(...this.blastImpulse(r, x, y, rd)); // el bot tiene física propia
-        this.sendHit(rd <= EXPLOSION.radius * EXPLOSION.coreRatio ? 2 : 1, 0, 0, 3);
+        this.sendHit(explosionDamage(rd), 0, 0, 3);
       }
     }
     // Cohete del bot: daña al jugador local aquí mismo.
     if (owner === 'remote' && this.remoteIsBot && this.player.alive && this.canDealDamage()) {
       const pd = Phaser.Math.Distance.Between(this.player.x, this.player.y, x, y);
-      if (pd <= EXPLOSION.radius) this.scene.receiveHit({ d: pd <= EXPLOSION.radius * EXPLOSION.coreRatio ? 2 : 1, kx: 0, ky: 0, w: 3 });
+      if (pd <= EXPLOSION.radius) this.scene.receiveHit({ d: explosionDamage(pd), kx: 0, ky: 0, w: 3 });
     }
 
     // Empuje (y salto con cohete) solo sobre nuestro jugador: el rival lo calcula en su cliente.
@@ -465,10 +476,9 @@ export default class WeaponSystem {
   }
 
   blastImpulse(target, x, y, dist) {
-    const force = EXPLOSION.minForce + (EXPLOSION.force - EXPLOSION.minForce) * (1 - dist / EXPLOSION.radius);
     const nx = dist > 1 ? (target.x - x) / dist : 0;
     const ny = dist > 1 ? (target.y - y) / dist : -1;
-    return [nx * force, Math.min(ny, -0.35) * force]; // siempre algo hacia arriba: sale volando
+    return blastImpulse(nx, ny, dist); // weapons.js: siempre algo hacia arriba, sale volando
   }
 
   // ------------------------------------------------------------------- update
